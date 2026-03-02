@@ -12,7 +12,7 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS builder
 COPY . .
 RUN pnpm run build && \
-    esbuild server/migrate.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
+    ./node_modules/.bin/esbuild server/migrate.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
 
 # Production image - keep all deps since server imports vite at runtime
 FROM node:22-alpine AS runner
