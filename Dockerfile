@@ -11,7 +11,8 @@ RUN pnpm install --frozen-lockfile
 # Build the application
 FROM deps AS builder
 COPY . .
-RUN pnpm run build
+RUN pnpm run build && \
+    esbuild server/migrate.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
 
 # Production image - keep all deps since server imports vite at runtime
 FROM node:22-alpine AS runner
@@ -27,9 +28,11 @@ RUN pnpm install --frozen-lockfile
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x docker-entrypoint.sh
 
 ENV NODE_ENV=production
 
 EXPOSE 3000
 
-CMD ["node", "dist/index.js"]
+CMD ["sh", "docker-entrypoint.sh"]
