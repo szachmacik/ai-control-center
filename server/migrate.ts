@@ -24,8 +24,8 @@ async function runMigrations() {
     connection = await mysql.createConnection(databaseUrl);
     const db = drizzle(connection);
 
-    // Find migrations folder - works both in dev and in Docker (dist/)
-    const migrationsFolder = path.resolve(__dirname, "../../drizzle");
+    // Find migrations folder - dist/migrate.js is in /app/dist, drizzle is in /app/drizzle
+    const migrationsFolder = path.resolve(__dirname, "../drizzle");
     console.log(`[Migrate] Running migrations from: ${migrationsFolder}`);
 
     await migrate(db, { migrationsFolder });
