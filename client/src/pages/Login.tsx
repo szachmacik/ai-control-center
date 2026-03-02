@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Loader2, Terminal, Zap, Shield } from "lucide-react";
+import { Loader2, Terminal, Zap, Shield, Mail, KeyRound, ArrowLeft } from "lucide-react";
 
 let supabaseClient: ReturnType<typeof createClient> | null = null;
 
@@ -17,49 +17,27 @@ async function getSupabaseClient() {
   return supabaseClient;
 }
 
+type Step = "email" | "otp";
+
 export default function Login() {
+  const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [checkingCallback, setCheckingCallback] = useState(false);
   const utils = trpc.useUtils();
 
-  // Handle magic link callback (hash fragment from Supabase)
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (!hash.includes("access_token")) return;
+  const exchangeToken = trpc.auth.exchangeSupabaseToken.useMutation({
+    onSuccess: async () => {
+      await utils.auth.me.invalidate();
+      window.location.href = "/";
+    },
+    onError: (err) => {
+      toast.error("Authentication failed: " + err.message);
+      setLoading(false);
+    },
+  });
 
-    setCheckingCallback(true);
-    const params = new URLSearchParams(hash.substring(1));
-    const accessToken = params.get("access_token");
-    if (!accessToken) {
-      setCheckingCallback(false);
-      return;
-    }
-
-    fetch("/api/auth/supabase-callback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ access_token: accessToken }),
-    })
-      .then(async (res) => {
-        if (res.ok) {
-          window.history.replaceState(null, "", window.location.pathname);
-          await utils.auth.me.invalidate();
-          window.location.href = "/";
-        } else {
-          const data = await res.json();
-          toast.error(data.error ?? "Authentication failed");
-          setCheckingCallback(false);
-        }
-      })
-      .catch(() => {
-        toast.error("Authentication failed");
-        setCheckingCallback(false);
-      });
-  }, []);
-
-  const handleSendLink = async (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
     setLoading(true);
@@ -67,36 +45,44 @@ export default function Login() {
       const supabase = await getSupabaseClient();
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: {
-          emailRedirectTo: `${window.location.origin}/login`,
-        },
+        options: { shouldCreateUser: true },
       });
       if (error) throw error;
-      setSent(true);
-      toast.success("Magic link sent — check your inbox");
+      setStep("otp");
+      toast.success("Code sent — check your inbox");
     } catch (err: any) {
-      toast.error(err.message ?? "Failed to send magic link");
+      toast.error(err.message ?? "Failed to send code");
     } finally {
       setLoading(false);
     }
   };
 
-  if (checkingCallback) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          <p className="text-muted-foreground text-sm">Authenticating…</p>
-        </div>
-      </div>
-    );
-  }
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otp.length < 6) return;
+    setLoading(true);
+    try {
+      const supabase = await getSupabaseClient();
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: otp.trim(),
+        type: "email",
+      });
+      if (error) throw error;
+      const accessToken = data.session?.access_token;
+      const refreshToken = data.session?.refresh_token ?? "";
+      if (!accessToken) throw new Error("No access token received");
+      await exchangeToken.mutateAsync({ accessToken, refreshToken });
+    } catch (err: any) {
+      toast.error(err.message ?? "Invalid code");
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
       {/* Left panel - branding */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 border-r border-border relative overflow-hidden">
-        {/* Background grid */}
         <div
           className="absolute inset-0 opacity-[0.03]"
           style={{
@@ -105,7 +91,6 @@ export default function Login() {
             backgroundSize: "40px 40px",
           }}
         />
-        {/* Glow */}
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10">
@@ -127,7 +112,6 @@ export default function Login() {
               Manage agents, deploy projects, monitor infrastructure — all from one elegant control panel.
             </p>
           </div>
-
           <div className="space-y-3">
             {[
               { icon: Zap, label: "Autonomous agent orchestration" },
@@ -160,44 +144,43 @@ export default function Login() {
             <span className="font-semibold text-foreground">AI Control Center</span>
           </div>
 
-          {!sent ? (
+          {step === "email" ? (
             <>
               <div className="space-y-2">
                 <h2 className="text-2xl font-bold text-foreground">Sign in</h2>
                 <p className="text-muted-foreground text-sm">
-                  Enter your email to receive a magic link
+                  Enter your email to receive a one-time code
                 </p>
               </div>
 
-              <form onSubmit={handleSendLink} className="space-y-4">
+              <form onSubmit={handleSendOtp} className="space-y-4">
                 <div className="space-y-2">
                   <label htmlFor="email" className="text-sm font-medium text-foreground">
                     Email address
                   </label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    autoFocus
-                    className="bg-input border-border text-foreground placeholder:text-muted-foreground focus:ring-primary"
-                  />
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      autoFocus
+                      className="pl-9 bg-input border-border text-foreground placeholder:text-muted-foreground"
+                    />
+                  </div>
                 </div>
-
                 <Button
                   type="submit"
-                  className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                  className="w-full"
                   disabled={loading || !email.trim()}
                 >
                   {loading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Sending…
-                    </>
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending…</>
                   ) : (
-                    "Send magic link"
+                    "Send code"
                   )}
                 </Button>
               </form>
@@ -207,24 +190,65 @@ export default function Login() {
               </p>
             </>
           ) : (
-            <div className="space-y-6 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto">
-                <Zap className="w-7 h-7 text-primary" />
-              </div>
+            <>
               <div className="space-y-2">
-                <h2 className="text-2xl font-bold text-foreground">Check your inbox</h2>
+                <button
+                  onClick={() => { setStep("email"); setOtp(""); }}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-1"
+                >
+                  <ArrowLeft className="w-3 h-3" /> Back
+                </button>
+                <h2 className="text-2xl font-bold text-foreground">Enter code</h2>
                 <p className="text-muted-foreground text-sm">
-                  We sent a magic link to <span className="text-foreground font-medium">{email}</span>
+                  We sent a 6-digit code to{" "}
+                  <span className="text-foreground font-medium">{email}</span>
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => setSent(false)}
-              >
-                Use a different email
-              </Button>
-            </div>
+
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="otp" className="text-sm font-medium text-foreground">
+                    One-time code
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      id="otp"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="123456"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      maxLength={6}
+                      required
+                      autoFocus
+                      className="pl-9 bg-input border-border text-foreground text-center tracking-[0.4em] text-lg font-mono"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Didn't receive it?{" "}
+                    <button
+                      type="button"
+                      onClick={() => { setStep("email"); setOtp(""); }}
+                      className="text-primary hover:underline"
+                    >
+                      Resend
+                    </button>
+                  </p>
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={loading || otp.length < 6}
+                >
+                  {loading ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Verifying…</>
+                  ) : (
+                    "Sign in"
+                  )}
+                </Button>
+              </form>
+            </>
           )}
         </div>
       </div>
