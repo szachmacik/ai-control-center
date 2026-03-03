@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import jwt from "jsonwebtoken";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -10,7 +11,7 @@ import * as db from "./db";
 import {
   listAgents, updateAgentStatus,
   listTasks, createTask,
-  listInfrastructure,
+  listInfrastructure, seedInfrastructure, seedAgents,
   listSecrets, createSecret, deleteSecret,
   listLogs,
   listProjects, createProject,
@@ -87,6 +88,36 @@ export const appRouter = router({
 
   infrastructure: router({
     list: protectedProcedure.query(() => listInfrastructure()),
+    // One-time seed for initial data population (admin only)
+    seed: adminProcedure.mutation(async () => {
+      const infraCount = await seedInfrastructure();
+      const agentCount = await seedAgents();
+      return { infraCount, agentCount };
+    }),
+    // Generate a short-lived SSO launch token for Supabase-OTP services
+    getLaunchToken: protectedProcedure
+      .input(z.object({
+        serviceUrl: z.string().url(),
+        serviceName: z.string(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const secret = process.env.JWT_SECRET ?? "fallback-secret";
+        const token = jwt.sign(
+          {
+            sub: ctx.user.openId,
+            email: ctx.user.email,
+            name: ctx.user.name,
+            iss: "ai-control-center.ofshore.dev",
+            aud: input.serviceName,
+          },
+          secret,
+          { expiresIn: "5m" }
+        );
+        // Append sso_token to the service URL
+        const url = new URL(input.serviceUrl);
+        url.searchParams.set("sso_token", token);
+        return { launchUrl: url.toString(), expiresIn: 300 };
+      }),
   }),
 
   secrets: router({

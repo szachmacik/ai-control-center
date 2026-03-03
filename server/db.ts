@@ -112,6 +112,34 @@ export async function updateAgentStatus(id: number, status: Agent["status"]) {
   await db.update(agents).set({ status, lastActive: new Date() }).where(eq(agents.id, id));
 }
 
+export async function seedAgents() {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+
+  // Only seed if table is empty
+  const existing = await db.select().from(agents).limit(1);
+  if (existing.length > 0) return 0;
+
+  const items = [
+    { name: "Manus Deployer", role: "autonomous-deployer", description: "Deploys and monitors applications on Coolify via API", model: "claude-3-5-sonnet", status: "active" as const },
+    { name: "Sentinel Monitor", role: "monitor", description: "Monitors infrastructure health and security events", model: "gpt-4o-mini", status: "active" as const },
+    { name: "Migration Bot", role: "db-admin", description: "Runs database migrations and schema updates", model: "gpt-4o-mini", status: "idle" as const },
+    { name: "Code Reviewer", role: "code-review", description: "Reviews PRs and suggests improvements", model: "claude-3-5-sonnet", status: "idle" as const },
+  ];
+
+  for (const item of items) {
+    await db.insert(agents).values({
+      name: item.name,
+      role: item.role,
+      description: item.description,
+      model: item.model,
+      status: item.status,
+      lastActive: new Date(),
+    });
+  }
+  return items.length;
+}
+
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
 export async function listTasks() {
@@ -142,6 +170,38 @@ export async function listInfrastructure() {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(infrastructure).orderBy(desc(infrastructure.updatedAt));
+}
+
+export async function seedInfrastructure() {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+
+  const items = [
+    { name: "Ollama", type: "service" as const, url: "http://ollama.ofshore.dev", status: "healthy" as const, metadata: { description: "Local LLM inference server", model: "llama3.2", auth: "none" } },
+    { name: "Open WebUI", type: "service" as const, url: "https://chat.ofshore.dev", status: "healthy" as const, metadata: { description: "Web interface for Ollama", auth: "builtin" } },
+    { name: "Kortix / Suna AI", type: "service" as const, url: "https://suna.ofshore.dev", status: "healthy" as const, metadata: { description: "Autonomous AI agent platform", auth: "builtin" } },
+    { name: "OpenCraw", type: "service" as const, url: "https://opencraw.ofshore.dev", status: "healthy" as const, metadata: { description: "Web crawling and scraping service", auth: "none" } },
+    { name: "Sentinel Dashboard", type: "service" as const, url: "https://sentinel.ofshore.dev", status: "healthy" as const, metadata: { description: "Infrastructure monitoring & SIEM", auth: "supabase-otp", ssoEnabled: true } },
+    { name: "Polaris Track", type: "service" as const, url: "https://polaris-track.ofshore.dev", status: "healthy" as const, metadata: { description: "Project tracking and management", auth: "supabase-otp", ssoEnabled: true } },
+    { name: "Coolify", type: "server" as const, url: "https://coolify.ofshore.dev", status: "healthy" as const, metadata: { description: "Self-hosted PaaS on DigitalOcean", version: "4.x", auth: "builtin" } },
+    { name: "Supabase", type: "database" as const, url: "https://supabase.com/dashboard/project/qhscjlfavyqkaplcwhxu", status: "healthy" as const, metadata: { description: "PostgreSQL + Auth + Storage", project: "qhscjlf", auth: "builtin" } },
+    { name: "Cloudflare", type: "service" as const, url: "https://dash.cloudflare.com", status: "healthy" as const, metadata: { description: "DNS & CDN for ofshore.dev", zone: "ofshore.dev", auth: "builtin" } },
+    { name: "DigitalOcean", type: "server" as const, url: "https://cloud.digitalocean.com", status: "healthy" as const, metadata: { description: "VPS hosting Coolify", ip: "178.62.246.169", auth: "builtin" } },
+  ];
+
+  // Delete existing and re-insert
+  await db.delete(infrastructure);
+  for (const item of items) {
+    await db.insert(infrastructure).values({
+      name: item.name,
+      type: item.type,
+      url: item.url,
+      status: item.status,
+      metadata: item.metadata,
+      lastChecked: new Date(),
+    });
+  }
+  return items.length;
 }
 
 // ─── Secrets ─────────────────────────────────────────────────────────────────
