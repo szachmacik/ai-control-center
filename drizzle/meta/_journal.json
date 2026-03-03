@@ -15,6 +15,13 @@
       "when": 1772477755540,
       "tag": "0001_abnormal_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1772502727181,
+      "tag": "0002_lonely_dreadnoughts",
+      "breakpoints": true
     }
   ]
 }

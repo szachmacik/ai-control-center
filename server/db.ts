@@ -2,8 +2,8 @@ import { eq, desc, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser, users,
-  agents, tasks, infrastructure, secrets, agentLogs, projects,
-  type Agent, type AgentLog,
+  agents, tasks, taskLogs, driveFiles, infrastructure, secrets, agentLogs, projects,
+  type Agent, type AgentLog, type TaskLog,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -152,7 +152,11 @@ export async function createTask(data: {
   title: string;
   description?: string;
   assignedTo?: string;
-  priority?: number;
+  agentId?: number;
+  priority?: "low" | "medium" | "high" | "urgent";
+  dueDate?: Date;
+  tags?: string[];
+  createdBy?: number;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -160,7 +164,11 @@ export async function createTask(data: {
     title: data.title,
     description: data.description ?? null,
     assignedTo: data.assignedTo ?? null,
-    priority: data.priority ?? 5,
+    agentId: data.agentId ?? null,
+    priority: data.priority ?? "medium",
+    dueDate: data.dueDate ?? null,
+    tags: data.tags ?? null,
+    createdBy: data.createdBy ?? null,
   });
 }
 
@@ -322,4 +330,88 @@ export async function getDashboardStats() {
     recentLogs: recentLogs.slice(0, 8),
     infrastructure: allInfra,
   };
+}
+
+// ─── Task status & logs (Multi-Agent Hub) ─────────────────────────────────────
+
+export async function updateTaskStatus(data: {
+  id: number;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  result?: string;
+  resultDriveUrl?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.update(tasks)
+    .set({
+      status: data.status,
+      result: data.result ?? undefined,
+      resultDriveUrl: data.resultDriveUrl ?? undefined,
+      startedAt: data.status === "running" ? new Date() : undefined,
+      completedAt: (data.status === "completed" || data.status === "failed") ? new Date() : undefined,
+    })
+    .where(eq(tasks.id, data.id));
+}
+
+export async function addTaskLog(data: {
+  taskId: number;
+  message: string;
+  level?: TaskLog["level"];
+  agentId?: number;
+  agentName?: string;
+  details?: unknown;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.insert(taskLogs).values({
+    taskId: data.taskId,
+    agentId: data.agentId ?? null,
+    agentName: data.agentName ?? null,
+    level: data.level ?? "info",
+    message: data.message,
+    details: data.details ?? null,
+  });
+}
+
+export async function getTaskLogs(taskId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(taskLogs)
+    .where(eq(taskLogs.taskId, taskId))
+    .orderBy(desc(taskLogs.createdAt))
+    .limit(100);
+}
+
+export async function addDriveFile(data: {
+  taskId?: number;
+  agentId?: number;
+  fileName: string;
+  driveFileId: string;
+  driveUrl: string;
+  mimeType?: string;
+  fileSize?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.insert(driveFiles).values({
+    taskId: data.taskId ?? null,
+    agentId: data.agentId ?? null,
+    fileName: data.fileName,
+    driveFileId: data.driveFileId,
+    driveUrl: data.driveUrl,
+    mimeType: data.mimeType ?? null,
+    fileSize: data.fileSize ?? null,
+  });
+}
+
+export async function getDriveFiles(taskId?: number, agentId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  if (taskId) {
+    return db.select().from(driveFiles).where(eq(driveFiles.taskId, taskId)).orderBy(desc(driveFiles.uploadedAt));
+  }
+  if (agentId) {
+    return db.select().from(driveFiles).where(eq(driveFiles.agentId, agentId)).orderBy(desc(driveFiles.uploadedAt));
+  }
+  return db.select().from(driveFiles).orderBy(desc(driveFiles.uploadedAt)).limit(50);
 }

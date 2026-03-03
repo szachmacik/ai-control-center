@@ -34,6 +34,12 @@ export const agents = mysqlTable("agents", {
   status: mysqlEnum("status", ["active", "idle", "offline", "error"]).default("idle").notNull(),
   tasksCompleted: int("tasks_completed").default(0).notNull(),
   lastActive: timestamp("last_active"),
+  // Multi-Agent Hub extensions
+  mcpEndpoint: varchar("mcp_endpoint", { length: 512 }),        // HTTP endpoint agent reports to
+  driveFolderId: varchar("drive_folder_id", { length: 128 }),   // Google Drive folder ID for this agent
+  driveFolderUrl: varchar("drive_folder_url", { length: 512 }), // Shareable Drive URL
+  apiKey: varchar("api_key", { length: 128 }),                  // Secret key for agent auth
+  agentType: mysqlEnum("agent_type", ["manus", "n8n", "autogpt", "crewai", "custom"]).default("custom"),
   config: json("config"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -47,16 +53,51 @@ export const tasks = mysqlTable("tasks", {
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
   status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled"]).default("pending").notNull(),
-  priority: int("priority").default(5).notNull(),
+  priority: mysqlEnum("priority", ["low", "medium", "high", "urgent"]).default("medium").notNull(),
   assignedTo: varchar("assigned_to", { length: 128 }),
   agentId: int("agent_id"),
   result: text("result"),
   error: text("error"),
+  // Multi-Agent Hub extensions
+  resultDriveUrl: varchar("result_drive_url", { length: 512 }), // Drive URL where agent uploaded results
+  resultDriveFileId: varchar("result_drive_file_id", { length: 128 }),
+  dueDate: timestamp("due_date"),
+  tags: json("tags"),                                           // string[]
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
+  createdBy: int("created_by"),                                 // user id who created
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+// Task logs (detailed per-task activity)
+export const taskLogs = mysqlTable("task_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  taskId: int("task_id").notNull(),
+  agentId: int("agent_id"),
+  agentName: varchar("agent_name", { length: 128 }),
+  level: mysqlEnum("level", ["info", "warning", "error", "success"]).default("info").notNull(),
+  message: text("message").notNull(),
+  details: json("details"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type TaskLog = typeof taskLogs.$inferSelect;
+
+// Drive files (files uploaded by agents as task results)
+export const driveFiles = mysqlTable("drive_files", {
+  id: int("id").autoincrement().primaryKey(),
+  taskId: int("task_id"),
+  agentId: int("agent_id"),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  driveFileId: varchar("drive_file_id", { length: 128 }).notNull(),
+  driveUrl: varchar("drive_url", { length: 512 }).notNull(),
+  mimeType: varchar("mime_type", { length: 128 }),
+  fileSize: int("file_size"),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+});
+
+export type DriveFile = typeof driveFiles.$inferSelect;
 
 export type Task = typeof tasks.$inferSelect;
 

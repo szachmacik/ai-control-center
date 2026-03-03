@@ -10,7 +10,7 @@ import { sdk } from "./_core/sdk";
 import * as db from "./db";
 import {
   listAgents, updateAgentStatus,
-  listTasks, createTask,
+  listTasks, createTask, updateTaskStatus, addTaskLog, getTaskLogs, addDriveFile, getDriveFiles,
   listInfrastructure, seedInfrastructure, seedAgents,
   listSecrets, createSecret, deleteSecret,
   listLogs,
@@ -81,9 +81,33 @@ export const appRouter = router({
         title: z.string().min(1),
         description: z.string().optional(),
         assignedTo: z.string().optional(),
-        priority: z.number().min(1).max(10).optional(),
+        agentId: z.number().optional(),
+        priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+        dueDate: z.date().optional(),
+        tags: z.array(z.string()).optional(),
       }))
-      .mutation(({ input }) => createTask(input)),
+      .mutation(({ input, ctx }) => createTask({ ...input, createdBy: ctx.user.id })),
+    updateStatus: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(["pending", "running", "completed", "failed", "cancelled"]),
+        result: z.string().optional(),
+        resultDriveUrl: z.string().optional(),
+      }))
+      .mutation(({ input }) => updateTaskStatus(input)),
+    addLog: protectedProcedure
+      .input(z.object({
+        taskId: z.number(),
+        message: z.string(),
+        level: z.enum(["info", "warning", "error", "success"]).optional(),
+        agentId: z.number().optional(),
+        agentName: z.string().optional(),
+        details: z.record(z.string(), z.unknown()).optional(),
+      }))
+      .mutation(({ input }) => addTaskLog(input)),
+    getLogs: protectedProcedure
+      .input(z.object({ taskId: z.number() }))
+      .query(({ input }) => getTaskLogs(input.taskId)),
   }),
 
   infrastructure: router({
