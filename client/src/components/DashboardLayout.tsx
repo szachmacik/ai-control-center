@@ -36,6 +36,8 @@ import {
   ChevronRight,
   ShieldCheck,
   Megaphone,
+  FlaskConical,
+  BarChart3,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -52,6 +54,8 @@ const menuItems = [
   { icon: ScrollText, label: "Activity Logs", path: "/logs" },
   { icon: ShieldCheck, label: "Audits", path: "/audits" },
   { icon: Megaphone, label: "Marketing", path: "/marketing" },
+  { icon: FlaskConical, label: "Security Sandbox", path: "/sandbox" },
+  { icon: BarChart3, label: "Meta Ads CAPI", path: "/meta-ads" },
   { icon: FolderPlus, label: "New Project", path: "/projects/new" },
 ];
 

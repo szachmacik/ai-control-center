@@ -17,6 +17,7 @@ import {
   handleFbCapiEvent,
   handleManychatWebhook,
 } from "../manusApi";
+import { startScheduleWorker } from "../sandbox/scheduleWorker";
 
 // SEC-011 FIX: Import helmet for security headers
 // Run: pnpm add helmet @types/helmet
@@ -239,6 +240,7 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
     // Start sandbox cleanup worker after server is up
     startCleanupWorker();
+    startScheduleWorker();
   });
 }
 

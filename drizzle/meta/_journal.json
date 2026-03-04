@@ -29,6 +29,20 @@
       "when": 1741067400000,
       "tag": "0003_security_sandbox",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1741154000000,
+      "tag": "0004_sandbox_schedules",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1741240000000,
+      "tag": "0005_meta_ads_capi",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@
 import * as https from "https";
 import * as http from "http";
 import { URL } from "url";
+import { lookupCvesBulk } from "./nvdLookup";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -883,11 +884,49 @@ export async function detectTechStack(targetUrl: string): Promise<TechProfile> {
   const djangoTech = matchedTechs.find((t) => t.name === "Django");
   if (djangoTech && djangoVersion) djangoTech.version = djangoVersion;
 
-  // CVE lookup for detected versions
-  const knownVulnerabilities = lookupCVEs(matchedTechs);
+  // CVE lookup — static database first (fast), then NVD API enrichment
+  const staticVulns = lookupCVEs(matchedTechs);
+
+  // Enrich with live NVD data for technologies where we detected a version
+  const techsWithVersions = matchedTechs
+    .filter((t) => t.version && ["cms", "framework", "language"].includes(t.category))
+    .map((t) => ({ name: t.name, version: t.version }));
+
+  let nvdVulns: KnownVulnerability[] = [];
+  if (techsWithVersions.length > 0) {
+    try {
+      const nvdResults = await lookupCvesBulk(techsWithVersions);
+      for (const result of nvdResults) {
+        for (const cve of result.cves) {
+          // Only include HIGH and CRITICAL from NVD to avoid noise
+          if (cve.severity === "CRITICAL" || cve.severity === "HIGH") {
+            nvdVulns.push({
+              cve: cve.id,
+              severity: cve.severity.toLowerCase() as "critical" | "high" | "medium" | "low",
+              description: cve.description,
+              affectedVersions: result.version ?? "unknown",
+              cvssScore: String(cve.cvssScore),
+            });
+          }
+        }
+      }
+    } catch {
+      // NVD lookup is best-effort — don't fail the whole detection
+    }
+  }
+
+  // Merge: NVD results take priority, static fills the gaps
+  const nvdCveIds = new Set(nvdVulns.map((v) => v.cve));
+  const mergedVulns = [
+    ...nvdVulns,
+    ...staticVulns.filter((v) => !nvdCveIds.has(v.cve)),
+  ];
+
+  const knownVulnerabilities = mergedVulns;
   if (knownVulnerabilities.length > 0) {
+    const nvdCount = nvdVulns.length;
     notes.push(
-      `Found ${knownVulnerabilities.length} known CVE(s) for detected technology versions.`
+      `Found ${knownVulnerabilities.length} known CVE(s) for detected technology versions${nvdCount > 0 ? ` (${nvdCount} from live NVD database)` : " (static database)"}.`
     );
   }
 

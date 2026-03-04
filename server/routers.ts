@@ -7,6 +7,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { runAudit } from "./auditEngine";
 import { sandboxRouter } from "./sandbox/sandboxRouter";
+import { metaRouter } from "./meta/metaRouter";
 import {
   listNotifications, countUnread, markRead, markAllRead, createNotification,
 } from "./notificationsDb";
@@ -44,6 +45,7 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 export const appRouter = router({
   system: systemRouter,
   sandbox: sandboxRouter,
+  meta: metaRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),

@@ -16,6 +16,10 @@ import NewProject from "./pages/NewProject";
 import Settings from "./pages/Settings";
 import Audits from "./pages/Audits";
 import Marketing from "./pages/Marketing";
+import SandboxList from "./pages/SandboxList";
+import SandboxNew from "./pages/SandboxNew";
+import SandboxDetail from "./pages/SandboxDetail";
+import MetaAds from "./pages/MetaAds";
 import DashboardLayout from "./components/DashboardLayout";
 import AuthCallback from "./pages/AuthCallback";
 import { Loader2 } from "lucide-react";
@@ -56,6 +60,10 @@ function Router() {
       <Route path="/audits" component={() => <ProtectedRoute component={Audits} />} />
       <Route path="/marketing" component={() => <ProtectedRoute component={Marketing} />} />
       <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
+      <Route path="/sandbox" component={() => <ProtectedRoute component={SandboxList} />} />
+      <Route path="/sandbox/new" component={() => <ProtectedRoute component={SandboxNew} />} />
+      <Route path="/sandbox/:id" component={() => <ProtectedRoute component={SandboxDetail} />} />
+      <Route path="/meta-ads" component={() => <ProtectedRoute component={MetaAds} />} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

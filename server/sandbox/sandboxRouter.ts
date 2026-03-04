@@ -8,7 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { sandboxEnvironments, sandboxScans, sandboxFindings } from "../../drizzle/schema";
+import { sandboxEnvironments, sandboxScans, sandboxFindings, sandboxSchedules } from "../../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { detectTechStack } from "./tech-detector";
 import { generateEnvironment, describeEnvironment } from "./env-generator";
@@ -615,6 +615,78 @@ export const sandboxRouter = router({
         riskScore >= 5  ? "Low Risk" : "Minimal Risk";
 
       return { riskScore, riskLevel, summary: s };
+    }),
+
+  // ─── Schedule management ──────────────────────────────────────────────────
+
+  createSchedule: protectedProcedure
+    .input(z.object({
+      sandboxId: z.number(),
+      schedule: z.enum(["daily", "weekly", "monthly"]),
+      scanType: z.enum(["passive", "active", "xss", "sqli", "headers", "ssl", "csrf", "open_redirect", "full"]).default("passive"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      // Deactivate any existing schedule for this sandbox
+      await db
+        .update(sandboxSchedules)
+        .set({ isActive: false })
+        .where(eq(sandboxSchedules.sandboxId, input.sandboxId));
+
+      const intervalMs = input.schedule === "daily" ? 86400000 : input.schedule === "weekly" ? 604800000 : 2592000000;
+      const nextRunAt = new Date(Date.now() + intervalMs);
+
+      const [result] = await db
+        .insert(sandboxSchedules)
+        .values({
+          sandboxId: input.sandboxId,
+          userId: ctx.user.id,
+          schedule: input.schedule,
+          scanType: input.scanType,
+          isActive: true,
+          nextRunAt,
+          runCount: 0,
+        })
+        .$returningId();
+
+      return { scheduleId: result.id, nextRunAt };
+    }),
+
+  getSchedule: protectedProcedure
+    .input(z.object({ sandboxId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      const db = await getDb();
+      if (!db) return null;
+
+      const [schedule] = await db
+        .select()
+        .from(sandboxSchedules)
+        .where(and(
+          eq(sandboxSchedules.sandboxId, input.sandboxId),
+          eq(sandboxSchedules.isActive, true)
+        ))
+        .limit(1);
+
+      return schedule ?? null;
+    }),
+
+  deleteSchedule: protectedProcedure
+    .input(z.object({ sandboxId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      await db
+        .update(sandboxSchedules)
+        .set({ isActive: false })
+        .where(eq(sandboxSchedules.sandboxId, input.sandboxId));
+
+      return { success: true };
     }),
 });
 
