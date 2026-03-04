@@ -14,9 +14,7 @@ import Secrets from "./pages/Secrets";
 import Logs from "./pages/Logs";
 import NewProject from "./pages/NewProject";
 import Settings from "./pages/Settings";
-import SandboxList from "./pages/SandboxList";
-import SandboxNew from "./pages/SandboxNew";
-import SandboxDetail from "./pages/SandboxDetail";
+import Audits from "./pages/Audits";
 import DashboardLayout from "./components/DashboardLayout";
 import AuthCallback from "./pages/AuthCallback";
 import { Loader2 } from "lucide-react";
@@ -54,10 +52,8 @@ function Router() {
       <Route path="/secrets" component={() => <ProtectedRoute component={Secrets} adminOnly />} />
       <Route path="/logs" component={() => <ProtectedRoute component={Logs} />} />
       <Route path="/projects/new" component={() => <ProtectedRoute component={NewProject} adminOnly />} />
+      <Route path="/audits" component={() => <ProtectedRoute component={Audits} />} />
       <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
-      <Route path="/sandbox" component={() => <ProtectedRoute component={SandboxList} />} />
-      <Route path="/sandbox/new" component={() => <ProtectedRoute component={SandboxNew} />} />
-      <Route path="/sandbox/:id" component={() => <ProtectedRoute component={SandboxDetail} />} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

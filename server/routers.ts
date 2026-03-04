@@ -1,6 +1,11 @@
 import { z } from "zod";
-import { sandboxRouter } from "./sandbox/sandboxRouter";
 import { TRPCError } from "@trpc/server";
+import { runAudit } from "./auditEngine";
+import {
+  listAuditProjects, createAuditProject, updateAuditProject, deleteAuditProject,
+  listAuditRuns, getAuditRun, listFindingsByRun, listRecentFindings,
+  listUptimeHistory, getAuditDashboardStats,
+} from "./auditDb";
 import jwt from "jsonwebtoken";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -181,6 +186,81 @@ export const appRouter = router({
         createProject({ ...input, createdBy: ctx.user.id })
       ),
   }),
-  sandbox: sandboxRouter,
+
+  // ─── Audit Module ─────────────────────────────────────────────────────────
+  audit: router({
+    // Overview stats for the audit dashboard
+    stats: protectedProcedure.query(() => getAuditDashboardStats()),
+
+    // Audit Projects (monitored targets: repos, URLs, Supabase)
+    projects: router({
+      list: protectedProcedure.query(() => listAuditProjects()),
+      create: adminProcedure
+        .input(z.object({
+          name: z.string().min(1),
+          type: z.enum(["github_repo", "url", "supabase", "npm_package"]),
+          target: z.string().min(1),
+          description: z.string().optional(),
+          enabled: z.boolean().optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
+        }))
+        .mutation(({ input, ctx }) =>
+          createAuditProject({ ...input, createdBy: ctx.user.id })
+        ),
+      update: adminProcedure
+        .input(z.object({
+          id: z.number(),
+          name: z.string().optional(),
+          enabled: z.boolean().optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
+          description: z.string().optional(),
+        }))
+        .mutation(({ input }) => {
+          const { id, ...data } = input;
+          return updateAuditProject(id, data);
+        }),
+      delete: adminProcedure
+        .input(z.object({ id: z.number() }))
+        .mutation(({ input }) => deleteAuditProject(input.id)),
+    }),
+
+    // Audit Runs — history and findings
+    runs: router({
+      list: protectedProcedure
+        .input(z.object({ limit: z.number().optional() }))
+        .query(({ input }) => listAuditRuns(input.limit ?? 50)),
+      get: protectedProcedure
+        .input(z.object({ id: z.number() }))
+        .query(({ input }) => getAuditRun(input.id)),
+      findings: protectedProcedure
+        .input(z.object({ runId: z.number() }))
+        .query(({ input }) => listFindingsByRun(input.runId)),
+    }),
+
+    // Recent findings across all runs (last N days)
+    recentFindings: protectedProcedure
+      .input(z.object({ days: z.number().optional() }))
+      .query(({ input }) => listRecentFindings(input.days ?? 7)),
+
+    // Uptime history for a specific monitored URL project
+    uptimeHistory: protectedProcedure
+      .input(z.object({ auditProjectId: z.number(), hours: z.number().optional() }))
+      .query(({ input }) => listUptimeHistory(input.auditProjectId, input.hours ?? 24)),
+
+    // Manually trigger an audit run (admin only)
+    trigger: adminProcedure
+      .input(z.object({
+        type: z.enum(["uptime", "security", "functional", "dependency", "db_health"]),
+        projectIds: z.array(z.number()).optional(),
+      }))
+      .mutation(({ input, ctx }) =>
+        runAudit({
+          type: input.type,
+          triggeredBy: ctx.user.email ?? ctx.user.name ?? "admin",
+          projectIds: input.projectIds,
+        })
+      ),
+  }),
 });
+
 export type AppRouter = typeof appRouter;
