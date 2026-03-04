@@ -9,14 +9,37 @@ const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY ?? "";
 
 // Emails that are allowed to access the app
-const ALLOWED_EMAILS = new Set([
+// Note: actual emails loaded from ALLOWED_EMAILS_CSV env var at runtime
+const ALLOWED_EMAILS_STATIC = new Set([
   "***REDACTED***",
+  "manus@ofshore.dev",
 ]);
 
+function getAllowedEmails(): Set<string> {
+  const csv = process.env.ALLOWED_EMAILS_CSV;
+  if (csv) {
+    return new Set(csv.split(',').map(e => e.trim().toLowerCase()).filter(Boolean));
+  }
+  return ALLOWED_EMAILS_STATIC;
+}
+
+const ALLOWED_EMAILS = getAllowedEmails();
+
 // Emails that automatically receive admin role
-const ADMIN_EMAILS = new Set([
+const ADMIN_EMAILS_STATIC = new Set([
   "***REDACTED***",
+  "manus@ofshore.dev",
 ]);
+
+function getAdminEmails(): Set<string> {
+  const csv = process.env.ADMIN_EMAILS_CSV;
+  if (csv) {
+    return new Set(csv.split(',').map(e => e.trim().toLowerCase()).filter(Boolean));
+  }
+  return ADMIN_EMAILS_STATIC;
+}
+
+const ADMIN_EMAILS = getAdminEmails();
 
 // JWKS endpoint for Supabase project
 let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
