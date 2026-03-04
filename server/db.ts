@@ -192,7 +192,8 @@ export async function seedInfrastructure() {
     { name: "Sentinel Dashboard", type: "service" as const, url: "https://sentinel.ofshore.dev", status: "healthy" as const, metadata: { description: "Infrastructure monitoring & SIEM", auth: "supabase-otp", ssoEnabled: true } },
     { name: "Polaris Track", type: "service" as const, url: "https://polaris-track.ofshore.dev", status: "healthy" as const, metadata: { description: "Project tracking and management", auth: "supabase-otp", ssoEnabled: true } },
     { name: "Coolify", type: "server" as const, url: "https://coolify.ofshore.dev", status: "healthy" as const, metadata: { description: "Self-hosted PaaS on DigitalOcean", version: "4.x", auth: "builtin" } },
-    { name: "Supabase", type: "database" as const, url: "https://supabase.com/dashboard/project/qhscjlfavyqkaplcwhxu", status: "healthy" as const, metadata: { description: "PostgreSQL + Auth + Storage", project: "qhscjlf", auth: "builtin" } },
+    // SEC-008 FIX: Removed hardcoded Supabase project ID — use env variable instead
+    { name: "Supabase", type: "database" as const, url: process.env.SUPABASE_DASHBOARD_URL || "https://supabase.com/dashboard", status: "healthy" as const, metadata: { description: "PostgreSQL + Auth + Storage", auth: "builtin" } },
     { name: "Cloudflare", type: "service" as const, url: "https://dash.cloudflare.com", status: "healthy" as const, metadata: { description: "DNS & CDN for ofshore.dev", zone: "ofshore.dev", auth: "builtin" } },
     { name: "DigitalOcean", type: "server" as const, url: "https://cloud.digitalocean.com", status: "healthy" as const, metadata: { description: "VPS hosting Coolify", ip: "178.62.246.169", auth: "builtin" } },
   ];
