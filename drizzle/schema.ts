@@ -159,3 +159,55 @@ export const projects = mysqlTable("projects", {
 });
 
 export type Project = typeof projects.$inferSelect;
+
+// ─── Security Sandbox ──────────────────────────────────────────────────────────
+
+export const sandboxEnvironments = mysqlTable("sandbox_environments", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id"),
+  name: varchar("name", { length: 128 }).notNull(),
+  targetUrl: varchar("target_url", { length: 512 }).notNull(),
+  status: mysqlEnum("status", ["cloning", "ready", "scanning", "completed", "error"]).default("cloning").notNull(),
+  sandboxUrl: varchar("sandbox_url", { length: 512 }),
+  sandboxPort: int("sandbox_port"),
+  deployType: mysqlEnum("deploy_type", ["manus_spaces", "local_download"]).default("manus_spaces").notNull(),
+  anonymized: boolean("anonymized").default(true).notNull(),
+  cloneProgress: int("clone_progress").default(0).notNull(), // 0-100
+  fileCount: int("file_count").default(0).notNull(),
+  notes: text("notes"),
+  createdBy: int("created_by"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SandboxEnvironment = typeof sandboxEnvironments.$inferSelect;
+
+export const sandboxScans = mysqlTable("sandbox_scans", {
+  id: int("id").autoincrement().primaryKey(),
+  sandboxId: int("sandbox_id").notNull(),
+  scanType: mysqlEnum("scan_type", ["passive", "active", "xss", "sqli", "headers", "ssl", "csrf", "open_redirect", "full"]).default("passive").notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "failed"]).default("pending").notNull(),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  summary: json("summary"), // { critical, high, medium, low, info }
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SandboxScan = typeof sandboxScans.$inferSelect;
+
+export const sandboxFindings = mysqlTable("sandbox_findings", {
+  id: int("id").autoincrement().primaryKey(),
+  scanId: int("scan_id").notNull(),
+  sandboxId: int("sandbox_id").notNull(),
+  severity: mysqlEnum("severity", ["critical", "high", "medium", "low", "info"]).default("info").notNull(),
+  category: varchar("category", { length: 64 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  evidence: text("evidence"),
+  affectedUrl: varchar("affected_url", { length: 512 }),
+  remediation: text("remediation"),
+  cvssScore: varchar("cvss_score", { length: 8 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SandboxFinding = typeof sandboxFindings.$inferSelect;

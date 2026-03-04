@@ -34,6 +34,7 @@ import {
   Terminal,
   Settings,
   ChevronRight,
+  FlaskConical,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -47,6 +48,7 @@ const menuItems = [
   { icon: Server, label: "Infrastructure", path: "/infrastructure" },
   { icon: KeyRound, label: "Secrets", path: "/secrets" },
   { icon: ScrollText, label: "Activity Logs", path: "/logs" },
+  { icon: FlaskConical, label: "Security Sandbox", path: "/sandbox" },
   { icon: FolderPlus, label: "New Project", path: "/projects/new" },
 ];
 

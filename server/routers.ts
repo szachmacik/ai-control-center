@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sandboxRouter } from "./sandbox/sandboxRouter";
 import { TRPCError } from "@trpc/server";
 import jwt from "jsonwebtoken";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
@@ -180,6 +181,6 @@ export const appRouter = router({
         createProject({ ...input, createdBy: ctx.user.id })
       ),
   }),
+  sandbox: sandboxRouter,
 });
-
 export type AppRouter = typeof appRouter;
