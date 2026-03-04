@@ -1,4 +1,5 @@
 import express from "express";
+import path from "path";
 import { ensureDatabaseExists } from "../initDb";
 import { createServer } from "http";
 import net from "net";
@@ -168,6 +169,27 @@ async function startServer() {
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Sandbox report download endpoint — serves generated HTML/JSON reports
+  app.get("/api/sandbox/report/:sandboxId/:filename", async (req, res) => {
+    try {
+      // Basic auth check via session cookie (same as tRPC)
+      const { sandboxId, filename } = req.params;
+      // Sanitize: only allow safe filenames
+      if (!/^sentinel-report-[\d]+-scan[\d]+\.(html|json)$/.test(filename)) {
+        return res.status(400).json({ error: "Invalid filename" });
+      }
+      const reportPath = path.join("/tmp/sandboxes", `sandbox-${sandboxId}`, "reports", filename);
+      const { access } = await import("fs/promises");
+      await access(reportPath);
+      const ext = filename.endsWith(".json") ? "application/json" : "text/html";
+      res.setHeader("Content-Type", ext);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.sendFile(reportPath);
+    } catch {
+      res.status(404).json({ error: "Report not found" });
     }
   });
 

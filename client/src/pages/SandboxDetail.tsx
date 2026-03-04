@@ -36,43 +36,24 @@ import {
   Zap,
   Info,
   Lock,
+  Filter,
+  FileDown,
+  Gauge,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 // ─── Severity config ──────────────────────────────────────────────────────────
 
-const SEV: Record<string, { label: string; color: string; bg: string; dot: string }> = {
-  critical: {
-    label: "Critical",
-    color: "text-red-400",
-    bg: "bg-red-500/10 border-red-500/20",
-    dot: "bg-red-500",
-  },
-  high: {
-    label: "High",
-    color: "text-orange-400",
-    bg: "bg-orange-500/10 border-orange-500/20",
-    dot: "bg-orange-500",
-  },
-  medium: {
-    label: "Medium",
-    color: "text-yellow-400",
-    bg: "bg-yellow-500/10 border-yellow-500/20",
-    dot: "bg-yellow-500",
-  },
-  low: {
-    label: "Low",
-    color: "text-blue-400",
-    bg: "bg-blue-500/10 border-blue-500/20",
-    dot: "bg-blue-500",
-  },
-  info: {
-    label: "Info",
-    color: "text-slate-400",
-    bg: "bg-slate-500/10 border-slate-500/20",
-    dot: "bg-slate-500",
-  },
+const SEV: Record<string, { label: string; color: string; bg: string; dot: string; ring: string }> = {
+  critical: { label: "Critical", color: "text-red-400",    bg: "bg-red-500/10 border-red-500/20",     dot: "bg-red-500",    ring: "ring-red-500/30" },
+  high:     { label: "High",     color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/20", dot: "bg-orange-500", ring: "ring-orange-500/30" },
+  medium:   { label: "Medium",   color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20", dot: "bg-yellow-500", ring: "ring-yellow-500/30" },
+  low:      { label: "Low",      color: "text-blue-400",   bg: "bg-blue-500/10 border-blue-500/20",   dot: "bg-blue-500",   ring: "ring-blue-500/30" },
+  info:     { label: "Info",     color: "text-slate-400",  bg: "bg-slate-500/10 border-slate-500/20", dot: "bg-slate-500",  ring: "ring-slate-500/30" },
 };
+
+const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
 
 function SeverityBadge({ severity }: { severity: string }) {
   const s = SEV[severity] ?? SEV.info;
@@ -84,12 +65,47 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
-function SummaryCard({ label, count, severity }: { label: string; count: number; severity: string }) {
+function SummaryCard({ label, count, severity, active, onClick }: { label: string; count: number; severity: string; active?: boolean; onClick?: () => void }) {
   const s = SEV[severity] ?? SEV.info;
   return (
-    <div className={`rounded-lg border p-3 text-center ${count > 0 ? s.bg : "bg-muted/20 border-border"}`}>
+    <button
+      onClick={onClick}
+      className={`rounded-lg border p-3 text-center transition-all w-full ${
+        count > 0 ? s.bg : "bg-muted/20 border-border"
+      } ${active ? `ring-2 ${s.ring}` : ""} ${count > 0 ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
+    >
       <div className={`text-2xl font-bold ${count > 0 ? s.color : "text-muted-foreground"}`}>{count}</div>
       <div className="text-xs text-muted-foreground mt-0.5">{label}</div>
+    </button>
+  );
+}
+
+// ─── Risk Score Gauge ─────────────────────────────────────────────────────────
+
+function RiskGauge({ score, level }: { score: number; level: string }) {
+  const color =
+    score >= 60 ? "text-red-400" :
+    score >= 40 ? "text-orange-400" :
+    score >= 20 ? "text-yellow-400" :
+    score >= 5  ? "text-blue-400" : "text-emerald-400";
+  const bg =
+    score >= 60 ? "bg-red-500" :
+    score >= 40 ? "bg-orange-500" :
+    score >= 20 ? "bg-yellow-500" :
+    score >= 5  ? "bg-blue-500" : "bg-emerald-500";
+
+  return (
+    <div className="flex items-center gap-3">
+      <Gauge className={`h-4 w-4 ${color}`} />
+      <div className="flex-1">
+        <div className="flex items-center justify-between text-xs mb-1">
+          <span className={`font-semibold ${color}`}>{level}</span>
+          <span className="text-muted-foreground">{score}/100</span>
+        </div>
+        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+          <div className={`h-full rounded-full transition-all duration-700 ${bg}`} style={{ width: `${score}%` }} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -151,23 +167,32 @@ function FindingCard({ finding }: { finding: any }) {
               <p className="text-sm text-foreground">{finding.remediation}</p>
             </div>
           )}
+          {(finding.cwe || finding.owasp) && (
+            <div className="flex gap-2 flex-wrap">
+              {finding.cwe && <Badge variant="outline" className="text-xs">{finding.cwe}</Badge>}
+              {finding.owasp && <Badge variant="outline" className="text-xs">{finding.owasp}</Badge>}
+            </div>
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Scan Types ───────────────────────────────────────────────────────────────
 
 const SCAN_TYPES = [
-  { value: "passive", label: "Passive" },
-  { value: "headers", label: "Headers" },
-  { value: "full", label: "Full Scan" },
-  { value: "xss", label: "XSS" },
-  { value: "sqli", label: "SQL Injection" },
-  { value: "csrf", label: "CSRF" },
-  { value: "open_redirect", label: "Open Redirect" },
+  { value: "passive",       label: "Passive",       safe: true  },
+  { value: "headers",       label: "Headers",       safe: true  },
+  { value: "ssl",           label: "SSL/TLS",       safe: true  },
+  { value: "csrf",          label: "CSRF",          safe: true  },
+  { value: "xss",           label: "XSS",           safe: false },
+  { value: "sqli",          label: "SQL Injection", safe: false },
+  { value: "open_redirect", label: "Open Redirect", safe: false },
+  { value: "full",          label: "Full Scan",     safe: false },
 ];
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SandboxDetail() {
   const params = useParams<{ id: string }>();
@@ -175,6 +200,9 @@ export default function SandboxDetail() {
   const sandboxId = parseInt(params.id ?? "0");
   const [selectedScanType, setSelectedScanType] = useState("passive");
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
+  const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   const { data: sandbox, isLoading, refetch } = trpc.sandbox.get.useQuery(
     { id: sandboxId },
@@ -216,6 +244,28 @@ export default function SandboxDetail() {
     onError: (err) => toast.error(err.message),
   });
 
+  const generateReportMutation = trpc.sandbox.generateReport.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Report generated: ${data.filename}`);
+      // Open download URL
+      const url = `/api/sandbox/report/${sandboxId}/${data.filename}`;
+      window.open(url, "_blank");
+      setIsGeneratingReport(false);
+    },
+    onError: (err) => {
+      toast.error(err.message);
+      setIsGeneratingReport(false);
+    },
+  });
+
+  const deleteMutation = trpc.sandbox.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Sandbox deleted");
+      setLocation("/sandbox");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   if (isLoading) {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-4">
@@ -244,9 +294,28 @@ export default function SandboxDetail() {
 
   const isActive = (sandbox as any).status === "cloning" || (sandbox as any).status === "scanning";
 
+  // Risk score calculation from summary
+  const riskScore = summary
+    ? Math.min(100, (summary.critical ?? 0) * 20 + (summary.high ?? 0) * 10 + (summary.medium ?? 0) * 5 + (summary.low ?? 0) * 2 + (summary.info ?? 0))
+    : 0;
+  const riskLevel =
+    riskScore >= 60 ? "Critical Risk" :
+    riskScore >= 40 ? "High Risk" :
+    riskScore >= 20 ? "Medium Risk" :
+    riskScore >= 5  ? "Low Risk" : "Minimal Risk";
+
+  // Filter findings
+  const filteredFindings = [...displayFindings]
+    .sort((a: any, b: any) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
+    .filter((f: any) => severityFilter === "all" || f.severity === severityFilter)
+    .filter((f: any) => categoryFilter === "all" || f.category === categoryFilter);
+
+  // Unique categories for filter
+  const categories: string[] = (Array.from(new Set(displayFindings.map((f: any) => String(f.category)))) as string[]).sort();
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
-      {/* Header */}
+      {/* Breadcrumb */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => setLocation("/sandbox")} className="gap-1.5">
           <ArrowLeft className="h-4 w-4" />
@@ -264,6 +333,17 @@ export default function SandboxDetail() {
               <div className="flex items-center gap-2.5 mb-2">
                 <FlaskConical className="h-5 w-5 text-primary" />
                 <h2 className="text-lg font-semibold text-foreground">{(sandbox as any).name}</h2>
+                <Badge
+                  variant="outline"
+                  className={`text-xs capitalize ${
+                    (sandbox as any).status === "completed" ? "border-emerald-500/30 text-emerald-400" :
+                    (sandbox as any).status === "error" ? "border-red-500/30 text-red-400" :
+                    (sandbox as any).status === "scanning" ? "border-yellow-500/30 text-yellow-400" :
+                    "border-border text-muted-foreground"
+                  }`}
+                >
+                  {(sandbox as any).status}
+                </Badge>
               </div>
               <div className="flex items-center gap-1.5 text-sm text-muted-foreground mb-3">
                 <Globe className="h-3.5 w-3.5" />
@@ -278,7 +358,7 @@ export default function SandboxDetail() {
                 </a>
               </div>
 
-              {/* Progress */}
+              {/* Progress bar */}
               {isActive && (
                 <div className="mb-3">
                   <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
@@ -313,7 +393,7 @@ export default function SandboxDetail() {
                   </span>
                 )}
                 {(sandbox as any).anonymized && (
-                  <span className="flex items-center gap-1 text-green-400">
+                  <span className="flex items-center gap-1 text-emerald-400">
                     <Lock className="h-3 w-3" />
                     PII anonymized
                   </span>
@@ -342,14 +422,24 @@ export default function SandboxDetail() {
                   onClick={() => downloadMutation.mutate({ id: sandboxId })}
                   disabled={downloadMutation.isPending}
                 >
-                  {downloadMutation.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Download className="h-3.5 w-3.5" />
-                  )}
+                  {downloadMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                   Download ZIP
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                onClick={() => {
+                  if (confirm("Delete this sandbox and all its data?")) {
+                    deleteMutation.mutate({ id: sandboxId });
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Delete
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -373,7 +463,12 @@ export default function SandboxDetail() {
                 <SelectContent>
                   {SCAN_TYPES.map((st) => (
                     <SelectItem key={st.value} value={st.value}>
-                      {st.label}
+                      <span className="flex items-center gap-2">
+                        {st.label}
+                        {!st.safe && (
+                          <span className="text-xs text-orange-400">(active)</span>
+                        )}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -389,17 +484,13 @@ export default function SandboxDetail() {
                 disabled={startScanMutation.isPending}
                 className="gap-2 shrink-0"
               >
-                {startScanMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
+                {startScanMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 Start Scan
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
               <Info className="h-3 w-3" />
-              Active scans (XSS, SQLi) run only against the sandbox environment — never your production site.
+              Active scans (XSS, SQLi, Open Redirect) run only against the sandbox environment — never your production site.
             </p>
           </CardContent>
         </Card>
@@ -408,7 +499,7 @@ export default function SandboxDetail() {
       {/* Scan results */}
       {displayScan && (
         <div className="space-y-4">
-          {/* Summary */}
+          {/* Results header */}
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
               <Shield className="h-4 w-4 text-primary" />
@@ -420,46 +511,129 @@ export default function SandboxDetail() {
                 </span>
               )}
               {displayScan.status === "completed" && (
-                <span className="text-xs text-muted-foreground">
-                  {displayScan.scanType} · {new Date(displayScan.completedAt).toLocaleTimeString("pl-PL")}
+                <span className="text-xs text-muted-foreground capitalize">
+                  {displayScan.scanType} · {displayScan.completedAt ? new Date(displayScan.completedAt).toLocaleTimeString("pl-PL") : ""}
                 </span>
               )}
             </h3>
-            <Button variant="ghost" size="sm" onClick={() => { refetch(); refetchScan(); }} className="gap-1.5 h-8">
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              {displayScan.status === "completed" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 h-8"
+                  disabled={isGeneratingReport}
+                  onClick={() => {
+                    setIsGeneratingReport(true);
+                    generateReportMutation.mutate({ scanId: displayScan.id, sandboxId, format: "html" });
+                  }}
+                >
+                  {isGeneratingReport ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
+                  Download Report
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => { refetch(); refetchScan(); }} className="gap-1.5 h-8">
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh
+              </Button>
+            </div>
           </div>
 
+          {/* Risk score */}
+          {summary && displayScan.status === "completed" && (
+            <Card className="border-border bg-card">
+              <CardContent className="p-4">
+                <RiskGauge score={riskScore} level={riskLevel} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Summary cards */}
           {summary && (
             <div className="grid grid-cols-5 gap-3">
-              <SummaryCard label="Critical" count={summary.critical} severity="critical" />
-              <SummaryCard label="High" count={summary.high} severity="high" />
-              <SummaryCard label="Medium" count={summary.medium} severity="medium" />
-              <SummaryCard label="Low" count={summary.low} severity="low" />
-              <SummaryCard label="Info" count={summary.info} severity="info" />
+              {SEVERITY_ORDER.map((sev) => (
+                <SummaryCard
+                  key={sev}
+                  label={sev.charAt(0).toUpperCase() + sev.slice(1)}
+                  count={summary[sev] ?? 0}
+                  severity={sev}
+                  active={severityFilter === sev}
+                  onClick={() => setSeverityFilter(severityFilter === sev ? "all" : sev)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Filters */}
+          {displayFindings.length > 0 && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setSeverityFilter("all")}
+                  className={`text-xs px-3 py-1 rounded-full border transition-colors ${severityFilter === "all" ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:border-primary/50"}`}
+                >
+                  All severity
+                </button>
+                {SEVERITY_ORDER.filter(s => displayFindings.some((f: any) => f.severity === s)).map(sev => {
+                  const s = SEV[sev];
+                  return (
+                    <button
+                      key={sev}
+                      onClick={() => setSeverityFilter(severityFilter === sev ? "all" : sev)}
+                      className={`text-xs px-3 py-1 rounded-full border transition-colors ${severityFilter === sev ? `${s.bg} ${s.color}` : "border-border text-muted-foreground hover:border-primary/50"}`}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {categories.length > 1 && (
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="h-7 text-xs w-40">
+                    <SelectValue placeholder="All categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All categories</SelectItem>
+                    {categories.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {(severityFilter !== "all" || categoryFilter !== "all") && (
+                <button
+                  onClick={() => { setSeverityFilter("all"); setCategoryFilter("all"); }}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           )}
 
           {/* Findings list */}
-          {displayFindings.length > 0 ? (
+          {filteredFindings.length > 0 ? (
             <div className="space-y-2">
-              {/* Sort: critical first */}
-              {[...displayFindings]
-                .sort((a: any, b: any) => {
-                  const order = ["critical", "high", "medium", "low", "info"];
-                  return order.indexOf(a.severity) - order.indexOf(b.severity);
-                })
-                .map((finding: any) => (
-                  <FindingCard key={finding.id} finding={finding} />
-                ))}
+              {filteredFindings.map((finding: any) => (
+                <FindingCard key={finding.id} finding={finding} />
+              ))}
+              {filteredFindings.length < displayFindings.length && (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Showing {filteredFindings.length} of {displayFindings.length} findings
+                </p>
+              )}
             </div>
           ) : displayScan.status === "completed" ? (
             <div className="flex flex-col items-center py-10 text-center">
               <CheckCircle2 className="h-10 w-10 text-emerald-400 mb-3" />
-              <p className="text-foreground font-medium">No findings detected</p>
+              <p className="text-foreground font-medium">
+                {displayFindings.length > 0 ? "No findings match the current filter" : "No findings detected"}
+              </p>
               <p className="text-sm text-muted-foreground mt-1">
-                The {displayScan.scanType} scan completed with no security issues found.
+                {displayFindings.length > 0
+                  ? "Try clearing the filters to see all results."
+                  : `The ${displayScan.scanType} scan completed with no security issues found.`}
               </p>
             </div>
           ) : null}
@@ -470,32 +644,49 @@ export default function SandboxDetail() {
       {(sandbox as any).scans?.length > 1 && (
         <Card className="border-border bg-card">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm text-muted-foreground">Scan History</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+              <Clock className="h-3.5 w-3.5" />
+              Scan History
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {(sandbox as any).scans.map((scan: any) => {
               const sum = scan.summary as any;
+              const rs = sum
+                ? Math.min(100, (sum.critical ?? 0) * 20 + (sum.high ?? 0) * 10 + (sum.medium ?? 0) * 5 + (sum.low ?? 0) * 2 + (sum.info ?? 0))
+                : null;
+              const isSelected = activeScanId === scan.id;
               return (
                 <button
                   key={scan.id}
-                  className="w-full flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/30 transition-colors text-left"
+                  className={`w-full flex items-center justify-between p-3 rounded-lg border transition-colors text-left ${isSelected ? "border-primary/50 bg-primary/5" : "border-border hover:border-primary/30"}`}
                   onClick={() => setActiveScanId(scan.id)}
                 >
                   <div className="flex items-center gap-2">
-                    <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                    <Shield className={`h-3.5 w-3.5 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
                     <span className="text-sm text-foreground capitalize">{scan.scanType}</span>
                     <span className="text-xs text-muted-foreground">
                       {new Date(scan.createdAt).toLocaleDateString("pl-PL")}
                     </span>
+                    <Badge variant="outline" className={`text-xs capitalize ${scan.status === "completed" ? "border-emerald-500/30 text-emerald-400" : scan.status === "failed" ? "border-red-500/30 text-red-400" : "border-border"}`}>
+                      {scan.status}
+                    </Badge>
                   </div>
-                  {sum && (
-                    <div className="flex items-center gap-1.5">
-                      {sum.critical > 0 && <span className="text-xs text-red-400">{sum.critical}C</span>}
-                      {sum.high > 0 && <span className="text-xs text-orange-400">{sum.high}H</span>}
-                      {sum.medium > 0 && <span className="text-xs text-yellow-400">{sum.medium}M</span>}
-                      {sum.total === 0 && <span className="text-xs text-emerald-400">Clean</span>}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {rs !== null && (
+                      <span className={`text-xs font-medium ${rs >= 60 ? "text-red-400" : rs >= 40 ? "text-orange-400" : rs >= 20 ? "text-yellow-400" : rs >= 5 ? "text-blue-400" : "text-emerald-400"}`}>
+                        Risk {rs}
+                      </span>
+                    )}
+                    {sum && (
+                      <div className="flex items-center gap-1.5">
+                        {(sum.critical ?? 0) > 0 && <span className="text-xs text-red-400">{sum.critical}C</span>}
+                        {(sum.high ?? 0) > 0 && <span className="text-xs text-orange-400">{sum.high}H</span>}
+                        {(sum.medium ?? 0) > 0 && <span className="text-xs text-yellow-400">{sum.medium}M</span>}
+                        {sum.total === 0 && <span className="text-xs text-emerald-400">Clean</span>}
+                      </div>
+                    )}
+                  </div>
                 </button>
               );
             })}

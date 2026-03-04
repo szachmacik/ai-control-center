@@ -13,7 +13,6 @@ import { eq, desc, and } from "drizzle-orm";
 import { detectTechStack } from "./tech-detector";
 import { generateEnvironment, describeEnvironment } from "./env-generator";
 import { cloneSite, packageSandboxAsZip, deleteSandboxFiles, SANDBOX_DIR } from "./cloner";
-import { runScan } from "./scanner";
 import {
   spinUpSandbox,
   teardownSandbox,
@@ -23,9 +22,80 @@ import {
 } from "./lifecycle";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { generateReport } from "./reportGenerator";
+import { runScan } from "./scanner";
 
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Simple in-memory rate limiter: max 5 sandbox creates per user per 10 minutes
+const createRateLimiter = new Map<number, { count: number; resetAt: number }>();
+const MAX_CREATES_PER_WINDOW = 5;
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+
+function checkCreateRateLimit(userId: number): void {
+  const now = Date.now();
+  const entry = createRateLimiter.get(userId);
+  if (!entry || now > entry.resetAt) {
+    createRateLimiter.set(userId, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return;
+  }
+  if (entry.count >= MAX_CREATES_PER_WINDOW) {
+    const waitSec = Math.ceil((entry.resetAt - now) / 1000);
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: `Rate limit exceeded. You can create ${MAX_CREATES_PER_WINDOW} sandboxes per 10 minutes. Try again in ${waitSec}s.`,
+    });
+  }
+  entry.count++;
+}
+
+// Simple in-memory rate limiter for scans: max 10 scans per user per 5 minutes
+const scanRateLimiter = new Map<number, { count: number; resetAt: number }>();
+const MAX_SCANS_PER_WINDOW = 10;
+const SCAN_WINDOW_MS = 5 * 60 * 1000;
+
+function checkScanRateLimit(userId: number): void {
+  const now = Date.now();
+  const entry = scanRateLimiter.get(userId);
+  if (!entry || now > entry.resetAt) {
+    scanRateLimiter.set(userId, { count: 1, resetAt: now + SCAN_WINDOW_MS });
+    return;
+  }
+  if (entry.count >= MAX_SCANS_PER_WINDOW) {
+    const waitSec = Math.ceil((entry.resetAt - now) / 1000);
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: `Rate limit exceeded. Max ${MAX_SCANS_PER_WINDOW} scans per 5 minutes. Try again in ${waitSec}s.`,
+    });
+  }
+  entry.count++;
+}
+
+// Validate URL: must be http/https, no localhost/private IPs
+function validateTargetUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid URL format" });
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "URL must use http or https protocol" });
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const blocked = [
+    'localhost', '127.0.0.1', '0.0.0.0', '::1',
+    '169.254.169.254', // AWS metadata
+    '10.', '172.16.', '172.17.', '172.18.', '172.19.',
+    '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
+    '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
+    '172.30.', '172.31.', '192.168.',
+  ];
+  if (blocked.some(b => hostname === b || hostname.startsWith(b))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Scanning internal/private addresses is not allowed" });
+  }
+}
 
 async function getSandboxOrThrow(id: number, userId: number) {
   const db = await getDb();
@@ -115,8 +185,24 @@ export const sandboxRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      // Security: validate URL and rate limit
+      validateTargetUrl(input.targetUrl);
+      checkCreateRateLimit(ctx.user.id);
+
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      // Limit: max 20 active sandboxes per user
+      const existing = await db
+        .select({ id: sandboxEnvironments.id })
+        .from(sandboxEnvironments)
+        .where(eq(sandboxEnvironments.createdBy, ctx.user.id));
+      if (existing.length >= 20) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Maximum 20 sandboxes per account. Please delete some before creating new ones.",
+        });
+      }
 
       // 1. Create sandbox record
       const [result] = await db.insert(sandboxEnvironments).values({
@@ -315,13 +401,23 @@ export const sandboxRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      // Security: rate limit scans
+      checkScanRateLimit(ctx.user.id);
+
       const { db, sandbox } = await getSandboxOrThrow(input.sandboxId, ctx.user.id);
 
       if (sandbox.status === "cloning") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Sandbox is still cloning. Wait for it to be ready." });
       }
+      if (sandbox.status === "scanning") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A scan is already running for this sandbox." });
+      }
 
       const targetUrl = input.targetUrl ?? sandbox.sandboxUrl ?? sandbox.targetUrl;
+      // Validate override URL if provided
+      if (input.targetUrl) {
+        validateTargetUrl(input.targetUrl);
+      }
 
       // Create scan record
       const [scanResult] = await db.insert(sandboxScans).values({
@@ -422,6 +518,103 @@ export const sandboxRouter = router({
 
       const zipPath = await packageSandboxAsZip(input.id);
       return { zipPath, filename: `sentinel-sandbox-${input.id}.zip` };
+    }),
+
+  // ── Generate security report for a scan ─────────────────────────────────────
+  generateReport: protectedProcedure
+    .input(z.object({ scanId: z.number(), sandboxId: z.number(), format: z.enum(["html", "json"]).default("html") }))
+    .mutation(async ({ input, ctx }) => {
+      const { sandbox } = await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [scan] = await db
+        .select()
+        .from(sandboxScans)
+        .where(eq(sandboxScans.id, input.scanId))
+        .limit(1);
+
+      if (!scan) throw new TRPCError({ code: "NOT_FOUND", message: "Scan not found" });
+      if (scan.status !== "completed") throw new TRPCError({ code: "BAD_REQUEST", message: "Scan not completed yet" });
+
+      const findings = await db
+        .select()
+        .from(sandboxFindings)
+        .where(eq(sandboxFindings.scanId, input.scanId));
+
+      const summary = (scan.summary as any) ?? { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 };
+
+      // Build a ScanResult-compatible object from DB data
+      const scanResult = {
+        findings: findings.map((f) => ({
+          id: String(f.id),
+          severity: f.severity as any,
+          category: f.category,
+          title: f.title,
+          description: f.description ?? "",
+          evidence: f.evidence ?? undefined,
+          affectedUrl: f.affectedUrl ?? undefined,
+          remediation: f.remediation ?? "",
+          cvssScore: f.cvssScore ?? undefined,
+        })),
+        summary,
+        scanType: scan.scanType as any,
+        targetUrl: sandbox.targetUrl,
+        duration: scan.startedAt && scan.completedAt
+          ? new Date(scan.completedAt).getTime() - new Date(scan.startedAt).getTime()
+          : 0,
+        startedAt: scan.startedAt ? new Date(scan.startedAt) : new Date(),
+        completedAt: scan.completedAt ? new Date(scan.completedAt) : new Date(),
+      };
+
+      const report = generateReport(scanResult, sandbox.name, undefined);
+
+      // Save report to disk
+      const reportDir = path.join("/tmp/sandboxes", `sandbox-${input.sandboxId}`, "reports");
+      await fs.mkdir(reportDir, { recursive: true });
+      const ext = input.format === "json" ? "json" : "html";
+      const filename = `sentinel-report-${input.sandboxId}-scan${input.scanId}.${ext}`;
+      const reportPath = path.join(reportDir, filename);
+      await fs.writeFile(reportPath, input.format === "json" ? report.json : report.html, "utf-8");
+
+      return {
+        filename,
+        reportPath,
+        summary: report.summary,
+        format: input.format,
+      };
+    }),
+
+  // ── Get risk score for a scan ────────────────────────────────────────────────
+  getRiskScore: protectedProcedure
+    .input(z.object({ scanId: z.number(), sandboxId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+
+      const db = await getDb();
+      if (!db) return null;
+
+      const [scan] = await db
+        .select()
+        .from(sandboxScans)
+        .where(eq(sandboxScans.id, input.scanId))
+        .limit(1);
+
+      if (!scan || !scan.summary) return null;
+
+      const s = scan.summary as any;
+      const riskScore = Math.min(
+        100,
+        (s.critical ?? 0) * 20 + (s.high ?? 0) * 10 + (s.medium ?? 0) * 5 + (s.low ?? 0) * 2 + (s.info ?? 0) * 1
+      );
+      const riskLevel =
+        riskScore >= 60 ? "Critical Risk" :
+        riskScore >= 40 ? "High Risk" :
+        riskScore >= 20 ? "Medium Risk" :
+        riskScore >= 5  ? "Low Risk" : "Minimal Risk";
+
+      return { riskScore, riskLevel, summary: s };
     }),
 });
 
