@@ -14,6 +14,13 @@ import { detectTechStack } from "./tech-detector";
 import { generateEnvironment, describeEnvironment } from "./env-generator";
 import { cloneSite, packageSandboxAsZip, deleteSandboxFiles, SANDBOX_DIR } from "./cloner";
 import { runScan } from "./scanner";
+import {
+  spinUpSandbox,
+  teardownSandbox,
+  getSandboxContainerStatus,
+  getSandboxExpiry,
+  extendSandboxTTL,
+} from "./lifecycle";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -197,15 +204,59 @@ export const sandboxRouter = router({
             })
             .where(eq(sandboxEnvironments.id, sandboxId));
 
-          // Step D: Mark ready
-          await db
-            .update(sandboxEnvironments)
-            .set({
-              status: "ready",
-              cloneProgress: 100,
-              notes: `Ready. Stack: ${envDef.stackLabel}. ${cloneResult.fileCount} files.`,
-            })
-            .where(eq(sandboxEnvironments.id, sandboxId));
+          // Step D: Spin up Docker environment (server-side, for manus_spaces)
+          if (input.deployType === "manus_spaces") {
+            await db
+              .update(sandboxEnvironments)
+              .set({ cloneProgress: 85, notes: `Starting ${envDef.stackLabel} Docker environment...` })
+              .where(eq(sandboxEnvironments.id, sandboxId));
+
+            const spinResult = await spinUpSandbox({
+              sandboxId,
+              tech: profile,
+              ttlMs: 60 * 60 * 1000, // 1 hour TTL
+              onProgress: async (msg) => {
+                await db
+                  .update(sandboxEnvironments)
+                  .set({ notes: msg })
+                  .where(eq(sandboxEnvironments.id, sandboxId))
+                  .catch(() => {});
+              },
+            });
+
+            if (spinResult.success) {
+              await db
+                .update(sandboxEnvironments)
+                .set({
+                  status: "ready",
+                  cloneProgress: 100,
+                  sandboxUrl: spinResult.sandboxUrl ?? null,
+                  sandboxPort: spinResult.sandboxPort ?? null,
+                  notes: `Live at ${spinResult.sandboxUrl} · Expires ${spinResult.expiresAt?.toLocaleString()} · Stack: ${envDef.stackLabel}`,
+                })
+                .where(eq(sandboxEnvironments.id, sandboxId));
+            } else {
+              // Spin-up failed — still mark ready for local use, note the error
+              await db
+                .update(sandboxEnvironments)
+                .set({
+                  status: "ready",
+                  cloneProgress: 100,
+                  notes: `Docker spin-up failed (${spinResult.error}). Files ready for local download.`,
+                })
+                .where(eq(sandboxEnvironments.id, sandboxId));
+            }
+          } else {
+            // local_download: just mark ready, no server-side Docker
+            await db
+              .update(sandboxEnvironments)
+              .set({
+                status: "ready",
+                cloneProgress: 100,
+                notes: `Ready for download. Stack: ${envDef.stackLabel}. ${cloneResult.fileCount} files.`,
+              })
+              .where(eq(sandboxEnvironments.id, sandboxId));
+          }
 
           // Step E: Auto-scan if requested
           if (input.autoScan) {
@@ -232,7 +283,10 @@ export const sandboxRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { db } = await getSandboxOrThrow(input.id, ctx.user.id);
 
-      await deleteSandboxFiles(input.id);
+      // Tear down Docker containers (if running server-side) + delete files
+      await teardownSandbox(input.id);
+      // Also clean up any leftover files via the old helper
+      await deleteSandboxFiles(input.id).catch(() => {});
 
       await db
         .delete(sandboxFindings)
@@ -334,6 +388,26 @@ export const sandboxRouter = router({
         .from(sandboxFindings)
         .where(eq(sandboxFindings.sandboxId, input.sandboxId))
         .orderBy(desc(sandboxFindings.createdAt));
+    }),
+
+  // ── Extend TTL of a running sandbox ───────────────────────────────────────────
+  extendTTL: protectedProcedure
+    .input(z.object({ id: z.number(), extraMinutes: z.number().min(5).max(480).default(60) }))
+    .mutation(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.id, ctx.user.id);
+      await extendSandboxTTL(input.id, input.extraMinutes * 60 * 1000);
+      const expiry = await getSandboxExpiry(input.id);
+      return { success: true, newExpiresAt: expiry };
+    }),
+
+  // ── Get container status for a sandbox ──────────────────────────────────────
+  getContainerStatus: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.id, ctx.user.id);
+      const status = await getSandboxContainerStatus(input.id);
+      const expiry = await getSandboxExpiry(input.id);
+      return { ...status, expiresAt: expiry };
     }),
 
   // ── Download sandbox as ZIP ──────────────────────────────────────────────────

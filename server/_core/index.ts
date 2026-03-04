@@ -8,6 +8,7 @@ import { registerSupabaseAuthRoutes } from "./supabaseAuth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { startCleanupWorker } from "../sandbox/cleanupWorker";
 
 // SEC-011 FIX: Import helmet for security headers
 // Run: pnpm add helmet @types/helmet
@@ -194,6 +195,8 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Start sandbox cleanup worker after server is up
+    startCleanupWorker();
   });
 }
 
