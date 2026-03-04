@@ -40,6 +40,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Badge } from "./ui/badge";
+import NotificationCenter from "./NotificationCenter";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -288,6 +289,13 @@ function DashboardLayoutContent({
                 {activeItem?.label ?? "Dashboard"}
               </span>
             </div>
+            <NotificationCenter />
+          </div>
+        )}
+        {/* Desktop topbar notification bell */}
+        {!isMobile && (
+          <div className="flex border-b border-border h-14 items-center justify-end bg-background px-6 sticky top-0 z-40">
+            <NotificationCenter />
           </div>
         )}
         <main className="flex-1 overflow-auto">{children}</main>

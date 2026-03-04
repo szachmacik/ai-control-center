@@ -2,18 +2,26 @@ import { trpc } from "@/lib/trpc";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ListTodo, Plus, RefreshCw, Clock, CheckCircle2, XCircle, Circle, AlertTriangle } from "lucide-react";
+import {
+  ListTodo, Plus, RefreshCw, Clock, CheckCircle2, XCircle, Circle,
+  AlertTriangle, ChevronRight, Info, ExternalLink, FileText,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useState } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { formatDistanceToNow } from "date-fns";
 
 type Priority = "low" | "medium" | "high" | "urgent";
 
@@ -31,14 +39,217 @@ const PRIORITY_ICON: Record<Priority, React.ReactNode> = {
   urgent: <AlertTriangle className="w-3 h-3 fill-destructive text-destructive" />,
 };
 
+// ─── Task Detail Sheet ────────────────────────────────────────────────────────
+
+function TaskDetailSheet({ task, open, onClose }: { task: any; open: boolean; onClose: () => void }) {
+  const isRunning = task?.status === "running";
+
+  const { data: logs = [], isLoading: logsLoading } = trpc.tasks.getLogs.useQuery(
+    { taskId: task?.id ?? 0 },
+    {
+      enabled: open && !!task?.id,
+      refetchInterval: isRunning ? 3000 : false,   // Poll every 3s while running
+    },
+  );
+
+  const updateStatus = trpc.tasks.updateStatus.useMutation({
+    onSuccess: () => toast.success("Task status updated"),
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const logLevelIcon = (level: string) => {
+    if (level === "error") return <XCircle className="w-3 h-3 text-destructive shrink-0" />;
+    if (level === "warning") return <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />;
+    if (level === "success") return <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />;
+    return <Info className="w-3 h-3 text-primary/60 shrink-0" />;
+  };
+
+  const logLevelColor = (level: string) => {
+    if (level === "error") return "text-destructive";
+    if (level === "warning") return "text-amber-400";
+    if (level === "success") return "text-emerald-400";
+    return "text-foreground/80";
+  };
+
+  const statusColor = (status: string) => {
+    if (status === "completed") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/25";
+    if (status === "running") return "bg-primary/10 text-primary border-primary/25";
+    if (status === "failed") return "bg-destructive/10 text-destructive border-destructive/25";
+    if (status === "cancelled") return "bg-muted/50 text-muted-foreground border-border";
+    return "bg-muted/30 text-muted-foreground border-border";
+  };
+
+  if (!task) return null;
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+      <SheetContent className="w-full sm:max-w-lg bg-card border-border flex flex-col p-0">
+        <SheetHeader className="px-6 py-4 border-b border-border shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <SheetTitle className="text-base font-semibold text-foreground leading-snug">{task.title}</SheetTitle>
+              {task.description && (
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.description}</p>
+              )}
+            </div>
+            <Badge variant="outline" className={`text-[10px] px-2 py-0.5 shrink-0 ${statusColor(task.status)}`}>
+              {task.status === "running" && <Clock className="w-2.5 h-2.5 mr-1 animate-pulse" />}
+              {task.status}
+            </Badge>
+          </div>
+
+          {/* Meta row */}
+          <div className="flex items-center gap-3 mt-3 flex-wrap">
+            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 gap-1 ${PRIORITY_COLORS[task.priority as Priority] ?? PRIORITY_COLORS.medium}`}>
+              {PRIORITY_ICON[task.priority as Priority]}
+              {task.priority}
+            </Badge>
+            {task.assignedTo && (
+              <span className="text-[10px] text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded">
+                {task.assignedTo}
+              </span>
+            )}
+            <span className="text-[10px] text-muted-foreground ml-auto">
+              Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
+            </span>
+          </div>
+
+          {/* Action buttons */}
+          {task.status === "pending" && (
+            <div className="flex gap-2 mt-3">
+              <Button
+                size="sm"
+                className="h-7 text-xs gap-1.5 bg-primary/10 text-primary border border-primary/25 hover:bg-primary/20"
+                variant="outline"
+                onClick={() => updateStatus.mutate({ id: task.id, status: "running" })}
+                disabled={updateStatus.isPending}
+              >
+                <Clock className="w-3 h-3" /> Mark Running
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 text-xs gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20"
+                variant="outline"
+                onClick={() => updateStatus.mutate({ id: task.id, status: "completed" })}
+                disabled={updateStatus.isPending}
+              >
+                <CheckCircle2 className="w-3 h-3" /> Complete
+              </Button>
+            </div>
+          )}
+          {task.status === "running" && (
+            <div className="flex gap-2 mt-3">
+              <Button
+                size="sm"
+                className="h-7 text-xs gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20"
+                variant="outline"
+                onClick={() => updateStatus.mutate({ id: task.id, status: "completed" })}
+                disabled={updateStatus.isPending}
+              >
+                <CheckCircle2 className="w-3 h-3" /> Mark Complete
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 text-xs gap-1.5 bg-destructive/10 text-destructive border border-destructive/25 hover:bg-destructive/20"
+                variant="outline"
+                onClick={() => updateStatus.mutate({ id: task.id, status: "failed" })}
+                disabled={updateStatus.isPending}
+              >
+                <XCircle className="w-3 h-3" /> Mark Failed
+              </Button>
+            </div>
+          )}
+        </SheetHeader>
+
+        {/* Result / Drive link */}
+        {(task.result || task.resultDriveUrl) && (
+          <div className="px-6 py-3 border-b border-border bg-muted/10 shrink-0">
+            {task.result && (
+              <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">{task.result}</p>
+            )}
+            {task.resultDriveUrl && (
+              <a
+                href={task.resultDriveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-[11px] text-primary hover:underline mt-1"
+              >
+                <FileText className="w-3 h-3" />
+                View result in Google Drive
+                <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Logs */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex items-center justify-between px-6 py-2.5 border-b border-border shrink-0">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Execution Logs
+            </p>
+            <div className="flex items-center gap-2">
+              {isRunning && (
+                <span className="flex items-center gap-1 text-[10px] text-primary">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                  Live
+                </span>
+              )}
+              <span className="text-[10px] text-muted-foreground">{logs.length} entries</span>
+            </div>
+          </div>
+
+          <ScrollArea className="flex-1">
+            {logsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-2">
+                <FileText className="w-8 h-8 text-muted-foreground/20" />
+                <p className="text-xs text-muted-foreground">No logs yet</p>
+              </div>
+            ) : (
+              <div className="px-6 py-3 space-y-2">
+                {(logs as any[]).map((log) => (
+                  <div key={log.id} className="flex items-start gap-2.5 group">
+                    <div className="mt-0.5 shrink-0">{logLevelIcon(log.level)}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs leading-snug ${logLevelColor(log.level)}`}>{log.message}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {log.agentName && (
+                          <span className="text-[10px] text-muted-foreground/60 font-medium">{log.agentName}</span>
+                        )}
+                        <span className="text-[10px] text-muted-foreground/40">
+                          {new Date(log.createdAt).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function Tasks() {
-  const { data: tasks, isLoading, refetch } = trpc.tasks.list.useQuery();
+  const { data: tasks, isLoading, refetch } = trpc.tasks.list.useQuery(
+    undefined,
+    { refetchInterval: 10_000 },   // Refresh task list every 10s
+  );
   const { data: agents } = trpc.agents.list.useQuery();
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => { refetch(); setOpen(false); toast.success("Task created"); },
     onError: (e: any) => toast.error(e.message),
   });
   const [open, setOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<any>(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -69,10 +280,16 @@ export default function Tasks() {
   };
 
   const TaskCard = ({ task }: { task: any }) => (
-    <div className="bg-card border border-border rounded-lg p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer">
+    <div
+      className="bg-card border border-border rounded-lg p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer group"
+      onClick={() => setSelectedTask(task)}
+    >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium text-foreground leading-snug">{task.title}</p>
-        {statusIcon(task.status)}
+        <div className="flex items-center gap-1">
+          {statusIcon(task.status)}
+          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+        </div>
       </div>
       {task.description && (
         <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
@@ -156,6 +373,14 @@ export default function Tasks() {
         </div>
       )}
 
+      {/* Task Detail Sheet */}
+      <TaskDetailSheet
+        task={selectedTask}
+        open={!!selectedTask}
+        onClose={() => setSelectedTask(null)}
+      />
+
+      {/* Create Task Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="bg-card border-border">
           <DialogHeader>

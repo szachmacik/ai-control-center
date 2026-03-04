@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { runAudit } from "./auditEngine";
+import { sandboxRouter } from "./sandbox/sandboxRouter";
+import {
+  listNotifications, countUnread, markRead, markAllRead, createNotification,
+} from "./notificationsDb";
 import {
   listAuditProjects, createAuditProject, updateAuditProject, deleteAuditProject,
   listAuditRuns, getAuditRun, listFindingsByRun, listRecentFindings,
@@ -34,6 +38,7 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 export const appRouter = router({
   system: systemRouter,
+  sandbox: sandboxRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
@@ -259,6 +264,35 @@ export const appRouter = router({
           triggeredBy: ctx.user.email ?? ctx.user.name ?? "admin",
           projectIds: input.projectIds,
         })
+      ),
+  }),
+
+  // ─── Notifications ─────────────────────────────────────────────────────────
+  notifications: router({
+    list: protectedProcedure
+      .query(({ ctx }) => listNotifications(ctx.user.id, 30)),
+
+    unreadCount: protectedProcedure
+      .query(({ ctx }) => countUnread(ctx.user.id)),
+
+    markRead: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => markRead(input.id)),
+
+    markAllRead: protectedProcedure
+      .mutation(({ ctx }) => markAllRead(ctx.user.id)),
+
+    // Admin: create a broadcast notification (userId = null)
+    broadcast: adminProcedure
+      .input(z.object({
+        type: z.enum(["audit", "agent", "task", "system", "security"]),
+        severity: z.enum(["info", "warning", "error", "success"]).optional(),
+        title: z.string().min(1),
+        body: z.string().optional(),
+        link: z.string().optional(),
+      }))
+      .mutation(({ input }) =>
+        createNotification({ ...input, severity: input.severity ?? "info" })
       ),
   }),
 });
