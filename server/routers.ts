@@ -1,3 +1,8 @@
+import {
+  insertFbCapiEvent, insertManychatEvent, listRecentFbEvents, listRecentManychatEvents,
+  listFbCampaigns, listManusQueue, getManusTask, getMarketingStats, insertManusTask,
+} from "./marketingDb";
+import { syncFbCampaigns, upsertCampaignFromMeta } from "./fbCapiService";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { runAudit } from "./auditEngine";
@@ -294,6 +299,46 @@ export const appRouter = router({
       .mutation(({ input }) =>
         createNotification({ ...input, severity: input.severity ?? "info" })
       ),
+  }),
+
+  // ─── Marketing Router ─────────────────────────────────────────────────────
+  marketing: router({
+    stats: protectedProcedure.query(() => getMarketingStats()),
+
+    campaigns: router({
+      list: protectedProcedure.query(() => listFbCampaigns()),
+      sync: protectedProcedure.mutation(async () => {
+        const result = await syncFbCampaigns();
+        if (result.success && result.campaigns) {
+          for (const c of result.campaigns as any[]) {
+            await upsertCampaignFromMeta(c);
+          }
+        }
+        return result;
+      }),
+    }),
+
+    capi: router({
+      list: protectedProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).optional() }))
+        .query(({ input }) => listRecentFbEvents(input.limit ?? 50)),
+    }),
+
+    manychat: router({
+      list: protectedProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).optional() }))
+        .query(({ input }) => listRecentManychatEvents(input.limit ?? 50)),
+    }),
+
+    queue: router({
+      list: protectedProcedure.query(() => listManusQueue(100)),
+      get: protectedProcedure
+        .input(z.object({ id: z.number() }))
+        .query(({ input }) => getManusTask(input.id)),
+      submit: protectedProcedure
+        .input(z.object({ taskType: z.string(), payload: z.record(z.string(), z.unknown()).optional() }))
+        .mutation(({ input }) => insertManusTask({ taskType: input.taskType, payload: input.payload ?? {}, submittedBy: "sentinel-ui" })),
+    }),
   }),
 });
 

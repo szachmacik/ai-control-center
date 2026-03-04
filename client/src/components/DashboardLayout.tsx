@@ -35,6 +35,7 @@ import {
   Settings,
   ChevronRight,
   ShieldCheck,
+  Megaphone,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -50,6 +51,7 @@ const menuItems = [
   { icon: KeyRound, label: "Secrets", path: "/secrets" },
   { icon: ScrollText, label: "Activity Logs", path: "/logs" },
   { icon: ShieldCheck, label: "Audits", path: "/audits" },
+  { icon: Megaphone, label: "Marketing", path: "/marketing" },
   { icon: FolderPlus, label: "New Project", path: "/projects/new" },
 ];
 

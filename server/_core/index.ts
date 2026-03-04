@@ -10,6 +10,13 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startCleanupWorker } from "../sandbox/cleanupWorker";
+import {
+  handleManusSubmitTask,
+  handleManusListTasks,
+  handleManusStatus,
+  handleFbCapiEvent,
+  handleManychatWebhook,
+} from "../manusApi";
 
 // SEC-011 FIX: Import helmet for security headers
 // Run: pnpm add helmet @types/helmet
@@ -194,6 +201,19 @@ async function startServer() {
   });
 
   // tRPC API
+  // ─── Manus Autonomous API ────────────────────────────────────────────────────
+  // Manus AI controls Sentinel via these endpoints using MANUS_API_KEY
+  app.get("/api/manus/status", handleManusStatus);
+  app.post("/api/manus/tasks", handleManusSubmitTask);
+  app.get("/api/manus/tasks", handleManusListTasks);
+
+  // ─── Marketing Webhooks ───────────────────────────────────────────────────
+  // Landing pages send FB CAPI events here (auth: x-internal-secret header)
+  app.post("/api/marketing/fb-event", handleFbCapiEvent);
+  // ManyChat flows send webhook events here (auth: x-manychat-secret header)
+  app.post("/api/marketing/manychat", handleManychatWebhook);
+
+  // ─── tRPC API ─────────────────────────────────────────────────────────────
   app.use(
     "/api/trpc",
     createExpressMiddleware({

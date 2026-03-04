@@ -15,6 +15,7 @@ import Logs from "./pages/Logs";
 import NewProject from "./pages/NewProject";
 import Settings from "./pages/Settings";
 import Audits from "./pages/Audits";
+import Marketing from "./pages/Marketing";
 import DashboardLayout from "./components/DashboardLayout";
 import AuthCallback from "./pages/AuthCallback";
 import { Loader2 } from "lucide-react";
@@ -53,6 +54,7 @@ function Router() {
       <Route path="/logs" component={() => <ProtectedRoute component={Logs} />} />
       <Route path="/projects/new" component={() => <ProtectedRoute component={NewProject} adminOnly />} />
       <Route path="/audits" component={() => <ProtectedRoute component={Audits} />} />
+      <Route path="/marketing" component={() => <ProtectedRoute component={Marketing} />} />
       <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
