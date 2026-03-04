@@ -108,3 +108,9 @@ temp/
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
+
+# Security additions (SEC-SCAN-003)
+*.pem
+*.key
+*.p12
+node_modules/
