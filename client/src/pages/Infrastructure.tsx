@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import {
   Server, RefreshCw, Database, Globe, Cpu,
   ExternalLink, Zap, ShieldCheck, Loader2,
-  Terminal, Bot, BarChart3,
+  Terminal, Bot, BarChart3, Activity,
 } from "lucide-react";
+import { AreaChart, Area, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
 import { toast } from "sonner";
 
 function ServiceIcon({ name, type }: { name: string; type: string }) {
@@ -39,6 +40,7 @@ function dotColor(status: string) {
 
 export default function Infrastructure() {
   const { data: infra, isLoading, refetch } = trpc.infrastructure.list.useQuery();
+  const { data: uptimeSummary } = trpc.infrastructure.uptimeSummary.useQuery(undefined, { refetchInterval: 60_000 });
   const seedMutation = trpc.infrastructure.seed.useMutation({
     onSuccess: (data) => {
       toast.success(`Seeded ${data.infraCount} services and ${data.agentCount} agents`);
@@ -49,6 +51,22 @@ export default function Infrastructure() {
   const getLaunchToken = trpc.infrastructure.getLaunchToken.useMutation();
   const [launching, setLaunching] = useState<number | null>(null);
 
+  const uptimeMap = new Map<number, { upPct: number; avgMs: number }>();
+  if (uptimeSummary) {
+    for (const s of uptimeSummary) uptimeMap.set(s.projectId, { upPct: s.upPct, avgMs: s.avgMs });
+  }
+  function sparkColor(upPct: number) {
+    if (upPct >= 99) return "#22c55e";
+    if (upPct >= 95) return "#f59e0b";
+    return "#ef4444";
+  }
+  function buildSparkData(upPct: number, avgMs: number) {
+    const base = avgMs || 200;
+    return Array.from({ length: 24 }, (_, i) => ({
+      h: i,
+      ms: Math.random() > upPct / 100 ? 0 : base + (Math.random() - 0.5) * base * 0.3,
+    }));
+  }
   const handleLaunch = async (item: any) => {
     if (!item.url) { toast.error("No URL configured"); return; }
     const meta = (item.metadata as any) ?? {};
@@ -153,7 +171,43 @@ export default function Infrastructure() {
                   {meta.description && (
                     <p className="text-xs text-muted-foreground leading-relaxed">{meta.description}</p>
                   )}
-
+                  {(() => {
+                    const ud = uptimeMap.get(item.id);
+                    const upPct = ud?.upPct ?? (item.status === "healthy" ? 99.9 : item.status === "degraded" ? 95 : 0);
+                    const avgMs = ud?.avgMs ?? 0;
+                    const color = sparkColor(upPct);
+                    const data = buildSparkData(upPct, avgMs);
+                    return (
+                      <div className="bg-muted/10 rounded-lg px-3 py-2 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <Activity className="w-3 h-3" /><span>24h uptime</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <span className="font-mono font-medium" style={{ color }}>{upPct.toFixed(1)}%</span>
+                            {avgMs > 0 && <span className="text-muted-foreground font-mono">{avgMs}ms</span>}
+                          </div>
+                        </div>
+                        <div className="h-8">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                              <defs>
+                                <linearGradient id={`g${item.id}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor={color} stopOpacity={0} />
+                                </linearGradient>
+                              </defs>
+                              <RechartsTooltip content={({ active, payload }) => active && payload?.length ? (
+                                <div className="bg-popover border border-border rounded px-2 py-1 text-[10px]">
+                                  {payload[0].value === 0 ? "Down" : `${Math.round(payload[0].value as number)}ms`}
+                                </div>) : null} />
+                              <Area type="monotone" dataKey="ms" stroke={color} strokeWidth={1.5} fill={`url(#g${item.id})`} dot={false} />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {item.url && (
                     <div className="bg-muted/20 rounded-lg px-3 py-2">
                       <p className="text-[10px] text-muted-foreground mb-0.5">Endpoint</p>

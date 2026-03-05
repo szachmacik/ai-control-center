@@ -14,8 +14,7 @@ import {
 import {
   listAuditProjects, createAuditProject, updateAuditProject, deleteAuditProject,
   listAuditRuns, getAuditRun, listFindingsByRun, listRecentFindings,
-  listUptimeHistory, getAuditDashboardStats,
-} from "./auditDb";
+  listUptimeHistory, getAuditDashboardStats, getUptimeSummary } from "./auditDb";
 import jwt from "jsonwebtoken";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -146,6 +145,8 @@ export const appRouter = router({
       return { infraCount, agentCount };
     }),
     // Generate a short-lived SSO launch token for Supabase-OTP services
+    uptimeSummary: protectedProcedure
+      .query(() => getUptimeSummary()),
     getLaunchToken: protectedProcedure
       .input(z.object({
         serviceUrl: z.string().url(),
