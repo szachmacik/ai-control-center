@@ -1570,29 +1570,37 @@ export async function runScan(
   };
 
   // Always run passive checks
-  await runCheck("Security Headers", 8, () => checkSecurityHeaders(targetUrl));
-  await runCheck("Cookie Security", 14, () => checkCookieSecurity(targetUrl));
-  await runCheck("TLS/SSL Configuration", 20, () => checkTLS(targetUrl));
-  await runCheck("CORS Configuration", 26, () => checkCORS(targetUrl));
-  await runCheck("Information Disclosure", 32, () => checkInformationDisclosure(targetUrl));
-  await runCheck("CSRF Detection", 38, () => checkCSRF(targetUrl));
-  await runCheck("Subdomain Takeover", 44, () => checkSubdomainTakeover(targetUrl));
-  await runCheck("Sensitive File Exposure", 52, () => checkSensitiveFiles(targetUrl));
+  await runCheck("Security Headers", 5, () => checkSecurityHeaders(targetUrl));
+  await runCheck("Cookie Security", 10, () => checkCookieSecurity(targetUrl));
+  await runCheck("TLS/SSL Configuration", 14, () => checkTLS(targetUrl));
+  await runCheck("CORS Configuration", 18, () => checkCORS(targetUrl));
+  await runCheck("Information Disclosure", 22, () => checkInformationDisclosure(targetUrl));
+  await runCheck("CSRF Detection", 26, () => checkCSRF(targetUrl));
+  await runCheck("Subdomain Takeover", 30, () => checkSubdomainTakeover(targetUrl));
+  await runCheck("Sensitive File Exposure", 35, () => checkSensitiveFiles(targetUrl));
+  await runCheck("Clickjacking Protection", 39, () => checkClickjacking(targetUrl));
+  await runCheck("HTTP Methods", 43, () => checkHttpMethods(targetUrl));
+  await runCheck("Subresource Integrity", 47, () => checkSubresourceIntegrity(targetUrl));
+  await runCheck("Mixed Content", 51, () => checkMixedContent(targetUrl));
+  await runCheck("CSP Quality", 55, () => checkCSPQuality(targetUrl));
+  await runCheck("HTML Comments", 58, () => checkHtmlComments(targetUrl));
+  await runCheck("Version Disclosure", 61, () => checkVersionDisclosure(targetUrl));
+  await runCheck("Referrer Policy", 64, () => checkReferrerPolicy(targetUrl));
 
   const isActive = ["active", "full", "xss", "sqli", "open_redirect"].includes(scanType);
 
   if (isActive || scanType === "xss") {
-    await runCheck("XSS Detection", 60, () => checkXSS(targetUrl));
+    await runCheck("XSS Detection", 70, () => checkXSS(targetUrl));
   }
   if (isActive || scanType === "sqli") {
-    await runCheck("SQL Injection", 68, () => checkSQLInjection(targetUrl));
+    await runCheck("SQL Injection", 76, () => checkSQLInjection(targetUrl));
   }
   if (isActive || scanType === "open_redirect") {
-    await runCheck("Open Redirect", 74, () => checkOpenRedirect(targetUrl));
+    await runCheck("Open Redirect", 81, () => checkOpenRedirect(targetUrl));
   }
   if (isActive) {
-    await runCheck("Directory Traversal", 80, () => checkDirectoryTraversal(targetUrl));
-    await runCheck("SSRF Detection", 86, () => checkSSRF(targetUrl));
+    await runCheck("Directory Traversal", 86, () => checkDirectoryTraversal(targetUrl));
+    await runCheck("SSRF Detection", 91, () => checkSSRF(targetUrl));
   }
 
   onProgress?.(96, "Compiling results...");
@@ -1637,4 +1645,391 @@ export async function runScan(
     startedAt,
     completedAt,
   };
+}
+
+// ─── 14. Clickjacking Protection ─────────────────────────────────────────────
+
+export async function checkClickjacking(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  try {
+    const r = await fetchUrl(targetUrl, { timeout: 10000 });
+    const xfo = r.headers["x-frame-options"] || "";
+    const csp = r.headers["content-security-policy"] || "";
+    const hasFrameAncestors = /frame-ancestors/i.test(csp);
+    const hasXFO = /DENY|SAMEORIGIN/i.test(xfo);
+
+    if (!hasXFO && !hasFrameAncestors) {
+      findings.push({
+        id: generateId(),
+        severity: "medium",
+        category: "Clickjacking",
+        title: "Missing clickjacking protection",
+        description:
+          "The page does not set X-Frame-Options or CSP frame-ancestors, making it embeddable in iframes. " +
+          "Attackers can overlay invisible iframes to trick users into clicking malicious elements (UI redressing).",
+        evidence: "X-Frame-Options: " + (xfo || "(absent)") + "\nCSP frame-ancestors: " + (hasFrameAncestors ? "present" : "(absent)"),
+        remediation:
+          "Add 'X-Frame-Options: DENY' or 'X-Frame-Options: SAMEORIGIN' header. " +
+          "Alternatively, add 'frame-ancestors none' or 'frame-ancestors self' to Content-Security-Policy.",
+        affectedUrl: targetUrl,
+        cwe: "CWE-1021",
+        owasp: "A05:2021 - Security Misconfiguration",
+        cvssScore: "4.3",
+      });
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
+}
+
+// ─── 15. HTTP Methods Enumeration ─────────────────────────────────────────────
+
+export async function checkHttpMethods(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  const DANGEROUS_METHODS = ["TRACE", "TRACK", "PUT", "DELETE", "CONNECT"];
+
+  try {
+    const r = await fetchUrl(targetUrl, { method: "OPTIONS", timeout: 8000, followRedirects: false });
+    const allow = r.headers["allow"] || r.headers["public"] || "";
+    const accessControlAllow = r.headers["access-control-allow-methods"] || "";
+    const combined = (allow + " " + accessControlAllow).toUpperCase();
+
+    for (const method of DANGEROUS_METHODS) {
+      if (combined.includes(method)) {
+        const isCritical = method === "TRACE" || method === "TRACK";
+        findings.push({
+          id: generateId(),
+          severity: isCritical ? "high" : "medium",
+          category: "HTTP Methods",
+          title: "Dangerous HTTP method enabled: " + method,
+          description:
+            method === "TRACE"
+              ? "TRACE method is enabled. This can be used in Cross-Site Tracing (XST) attacks to steal cookies even when HttpOnly is set."
+              : method === "PUT" || method === "DELETE"
+              ? method + " method is enabled. This may allow unauthorized file upload or deletion."
+              : "HTTP method " + method + " is enabled and may pose a security risk.",
+          evidence: "Allow header: " + allow + "\nAccess-Control-Allow-Methods: " + accessControlAllow,
+          remediation:
+            "Disable unnecessary HTTP methods in your web server configuration. " +
+            "For Apache: use 'LimitExcept GET POST'. For Nginx: use 'limit_except GET POST { deny all; }'.",
+          affectedUrl: targetUrl,
+          cwe: "CWE-650",
+          owasp: "A05:2021 - Security Misconfiguration",
+          cvssScore: isCritical ? "6.5" : "4.3",
+        });
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
+}
+
+// ─── 16. Subresource Integrity (SRI) Check ───────────────────────────────────
+
+export async function checkSubresourceIntegrity(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  try {
+    const r = await fetchUrl(targetUrl, { timeout: 10000 });
+    const body = r.body;
+
+    // Find external scripts and stylesheets without integrity attribute
+    const externalScriptPattern = /<script[^>]+src\s*=\s*["']https?:\/\/(?!(?:localhost|127\.0\.0\.1))[^"']+["'][^>]*>/gi;
+    const externalLinkPattern = /<link[^>]+href\s*=\s*["']https?:\/\/(?!(?:localhost|127\.0\.0\.1))[^"']+["'][^>]*rel\s*=\s*["']stylesheet["'][^>]*>/gi;
+
+    const scripts = body.match(externalScriptPattern) || [];
+    const links = body.match(externalLinkPattern) || [];
+
+    let missingCount = 0;
+    for (const tag of [...scripts, ...links]) {
+      if (!/integrity\s*=/i.test(tag) && !/data-cfasync/i.test(tag)) {
+        missingCount++;
+      }
+    }
+
+    if (missingCount > 0) {
+      findings.push({
+        id: generateId(),
+        severity: "low",
+        category: "Subresource Integrity",
+        title: missingCount + " external resource(s) missing SRI hash",
+        description:
+          missingCount + " external script(s) or stylesheet(s) are loaded without Subresource Integrity (SRI) hashes. " +
+          "If the CDN is compromised, malicious code could be injected into your pages.",
+        evidence: "External resources without integrity attribute: " + missingCount,
+        remediation:
+          "Add integrity and crossorigin attributes to external resources: " +
+          '<script src="..." integrity="sha384-..." crossorigin="anonymous">. ' +
+          "Generate hashes at https://www.srihash.org/",
+        affectedUrl: targetUrl,
+        cwe: "CWE-353",
+        owasp: "A08:2021 - Software and Data Integrity Failures",
+        cvssScore: "3.7",
+      });
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
+}
+
+// ─── 17. Mixed Content Detection ─────────────────────────────────────────────
+
+export async function checkMixedContent(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== "https:") return findings;
+
+    const r = await fetchUrl(targetUrl, { timeout: 10000 });
+    const body = r.body;
+
+    const httpResourcePattern = /(?:src|href|action)\s*=\s*["']http:\/\/[^"']+["']/gi;
+    const matches = body.match(httpResourcePattern) || [];
+
+    if (matches.length > 0) {
+      findings.push({
+        id: generateId(),
+        severity: "medium",
+        category: "Mixed Content",
+        title: matches.length + " mixed content resource(s) detected",
+        description:
+          "The HTTPS page loads " + matches.length + " resource(s) over HTTP. " +
+          "Mixed content degrades security and may be blocked by browsers, breaking functionality.",
+        evidence: "Examples: " + matches.slice(0, 3).join(", "),
+        remediation:
+          "Update all resource URLs to use HTTPS. " +
+          "Use protocol-relative URLs (//example.com) or enforce HTTPS for all assets. " +
+          "Enable HSTS to prevent future mixed content.",
+        affectedUrl: targetUrl,
+        cwe: "CWE-319",
+        owasp: "A02:2021 - Cryptographic Failures",
+        cvssScore: "4.3",
+      });
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
+}
+
+// ─── 18. Content Security Policy Analysis ────────────────────────────────────
+
+export async function checkCSPQuality(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  try {
+    const r = await fetchUrl(targetUrl, { timeout: 10000 });
+    const csp = r.headers["content-security-policy"] || "";
+
+    if (!csp) {
+      findings.push({
+        id: generateId(),
+        severity: "medium",
+        category: "Content Security Policy",
+        title: "No Content-Security-Policy header",
+        description:
+          "The page does not define a Content Security Policy. " +
+          "CSP is a critical defense against XSS attacks by controlling which resources can be loaded.",
+        evidence: "Content-Security-Policy header: (absent)",
+        remediation:
+          "Implement a strict CSP header. Start with: " +
+          "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+          "Use https://csp-evaluator.withgoogle.com/ to validate your policy.",
+        affectedUrl: targetUrl,
+        cwe: "CWE-693",
+        owasp: "A05:2021 - Security Misconfiguration",
+        cvssScore: "5.4",
+      });
+    } else {
+      // Check for unsafe directives
+      const issues: string[] = [];
+      if (/'unsafe-eval'/i.test(csp)) issues.push("'unsafe-eval' allows eval() — enables XSS");
+      if (/'unsafe-inline'/i.test(csp) && !/script-src[^;]*'nonce-/i.test(csp)) issues.push("'unsafe-inline' in script-src without nonce — enables inline XSS");
+      if (/\*\.?[a-z]+\.[a-z]+/i.test(csp) && /script-src[^;]*\*/i.test(csp)) issues.push("Wildcard (*) in script-src — overly permissive");
+      if (!/default-src/i.test(csp) && !/script-src/i.test(csp)) issues.push("Missing default-src and script-src directives");
+
+      if (issues.length > 0) {
+        findings.push({
+          id: generateId(),
+          severity: "low",
+          category: "Content Security Policy",
+          title: "Weak Content-Security-Policy: " + issues.length + " issue(s)",
+          description: "The CSP policy has weaknesses that reduce its effectiveness: " + issues.join("; "),
+          evidence: "CSP: " + csp.substring(0, 300) + "\nIssues: " + issues.join("; "),
+          remediation:
+            "Remove 'unsafe-eval' and 'unsafe-inline'. Use nonces or hashes for inline scripts. " +
+            "Avoid wildcards in script-src. Validate at https://csp-evaluator.withgoogle.com/",
+          affectedUrl: targetUrl,
+          cwe: "CWE-693",
+          owasp: "A05:2021 - Security Misconfiguration",
+          cvssScore: "3.7",
+        });
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
+}
+
+// ─── 19. Sensitive Data in Comments ──────────────────────────────────────────
+
+export async function checkHtmlComments(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  try {
+    const r = await fetchUrl(targetUrl, { timeout: 10000 });
+    const body = r.body;
+
+    const commentPattern = /<!--([\s\S]*?)-->/g;
+    const SENSITIVE_PATTERNS = [
+      { p: /password|passwd|pwd/i, label: "password reference" },
+      { p: /api[_-]?key|apikey/i, label: "API key reference" },
+      { p: /todo|fixme|hack|workaround/i, label: "developer note" },
+      { p: /internal|staging|dev\.|localhost/i, label: "internal URL/environment reference" },
+      { p: /secret|token|credential/i, label: "credential reference" },
+      { p: /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/, label: "internal IP address" },
+    ];
+
+    let match;
+    const found: string[] = [];
+    while ((match = commentPattern.exec(body)) !== null) {
+      const comment = match[1];
+      for (const { p, label } of SENSITIVE_PATTERNS) {
+        if (p.test(comment) && !found.includes(label)) {
+          found.push(label);
+        }
+      }
+    }
+
+    if (found.length > 0) {
+      findings.push({
+        id: generateId(),
+        severity: "low",
+        category: "Information Disclosure",
+        title: "Sensitive data in HTML comments: " + found.join(", "),
+        description:
+          "HTML comments contain potentially sensitive information: " + found.join(", ") + ". " +
+          "Developers sometimes leave debug notes, credentials, or internal URLs in HTML comments.",
+        evidence: "Sensitive patterns found in comments: " + found.join(", "),
+        remediation:
+          "Remove all HTML comments from production code. " +
+          "Use a build process that strips comments. Never include credentials or internal paths in comments.",
+        affectedUrl: targetUrl,
+        cwe: "CWE-615",
+        owasp: "A05:2021 - Security Misconfiguration",
+        cvssScore: "3.1",
+      });
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
+}
+
+// ─── 20. Dependency Version Disclosure ───────────────────────────────────────
+
+export async function checkVersionDisclosure(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  try {
+    const r = await fetchUrl(targetUrl, { timeout: 10000 });
+
+    // Check response headers for version info
+    const VERSION_HEADERS = [
+      { h: "server", label: "Server" },
+      { h: "x-powered-by", label: "X-Powered-By" },
+      { h: "x-aspnet-version", label: "ASP.NET Version" },
+      { h: "x-aspnetmvc-version", label: "ASP.NET MVC Version" },
+      { h: "x-generator", label: "Generator" },
+    ];
+
+    const disclosed: string[] = [];
+    for (const { h, label } of VERSION_HEADERS) {
+      const val = r.headers[h];
+      if (val && /\d+\.\d+/.test(val)) {
+        disclosed.push(label + ": " + val);
+      }
+    }
+
+    // Check meta generator tag
+    const metaGen = r.body.match(/<meta[^>]+name\s*=\s*["']generator["'][^>]+content\s*=\s*["']([^"']+)["']/i);
+    if (metaGen) {
+      disclosed.push("Meta generator: " + metaGen[1]);
+    }
+
+    if (disclosed.length > 0) {
+      findings.push({
+        id: generateId(),
+        severity: "info",
+        category: "Information Disclosure",
+        title: "Software version disclosed in " + disclosed.length + " location(s)",
+        description:
+          "The server discloses software versions in HTTP headers or meta tags. " +
+          "This helps attackers identify specific vulnerabilities for the disclosed versions.",
+        evidence: disclosed.join("\n"),
+        remediation:
+          "Remove or obscure version information from HTTP headers. " +
+          "For Apache: ServerTokens Prod, ServerSignature Off. " +
+          "For Nginx: server_tokens off. " +
+          "For PHP: expose_php = Off in php.ini.",
+        affectedUrl: targetUrl,
+        cwe: "CWE-200",
+        owasp: "A05:2021 - Security Misconfiguration",
+        cvssScore: "2.7",
+      });
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
+}
+
+// ─── 21. Referrer Policy Check ───────────────────────────────────────────────
+
+export async function checkReferrerPolicy(targetUrl: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  try {
+    const r = await fetchUrl(targetUrl, { timeout: 10000 });
+    const rp = r.headers["referrer-policy"] || "";
+    const WEAK_POLICIES = ["unsafe-url", "no-referrer-when-downgrade", "origin-when-cross-origin"];
+
+    if (!rp) {
+      findings.push({
+        id: generateId(),
+        severity: "low",
+        category: "Privacy",
+        title: "Missing Referrer-Policy header",
+        description:
+          "No Referrer-Policy header is set. By default, browsers may send the full URL as a Referer header " +
+          "to third-party sites, potentially leaking sensitive URL parameters (tokens, session IDs).",
+        evidence: "Referrer-Policy: (absent)",
+        remediation:
+          "Add 'Referrer-Policy: strict-origin-when-cross-origin' or 'Referrer-Policy: no-referrer' header.",
+        affectedUrl: targetUrl,
+        cwe: "CWE-200",
+        owasp: "A05:2021 - Security Misconfiguration",
+        cvssScore: "3.1",
+      });
+    } else if (WEAK_POLICIES.includes(rp.toLowerCase())) {
+      findings.push({
+        id: generateId(),
+        severity: "low",
+        category: "Privacy",
+        title: "Weak Referrer-Policy: " + rp,
+        description:
+          "The Referrer-Policy '" + rp + "' may leak full URLs to third-party sites, " +
+          "including sensitive query parameters.",
+        evidence: "Referrer-Policy: " + rp,
+        remediation:
+          "Use 'strict-origin-when-cross-origin' or 'no-referrer' for better privacy protection.",
+        affectedUrl: targetUrl,
+        cwe: "CWE-200",
+        owasp: "A05:2021 - Security Misconfiguration",
+        cvssScore: "2.7",
+      });
+    }
+  } catch {
+    // Ignore
+  }
+  return findings;
 }

@@ -81,6 +81,133 @@ function donutChart(summary: ScanResult["summary"]): string {
   </svg>`;
 }
 
+// ─── OWASP Top 10 coverage table ──────────────────────────────────────────────
+
+const OWASP_TOP_10: Array<{ id: string; name: string; categories: string[] }> = [
+  { id: "A01", name: "Broken Access Control",           categories: ["Access Control", "Directory Traversal", "Path Traversal"] },
+  { id: "A02", name: "Cryptographic Failures",          categories: ["SSL/TLS", "HTTPS", "Cryptography"] },
+  { id: "A03", name: "Injection",                       categories: ["SQL Injection", "Command Injection", "XXE", "LDAP Injection"] },
+  { id: "A04", name: "Insecure Design",                 categories: ["CSRF", "Business Logic"] },
+  { id: "A05", name: "Security Misconfiguration",       categories: ["Security Headers", "CORS", "Server Info", "Debug Endpoints", "Admin Panel"] },
+  { id: "A06", name: "Vulnerable Components",           categories: ["CVE", "Outdated Libraries", "Dependency"] },
+  { id: "A07", name: "Auth Failures",                   categories: ["Authentication", "Session", "JWT", "Cookie Security"] },
+  { id: "A08", name: "Software Integrity Failures",     categories: ["Subresource Integrity", "Supply Chain"] },
+  { id: "A09", name: "Logging & Monitoring Failures",   categories: ["Information Disclosure", "Error Handling"] },
+  { id: "A10", name: "SSRF",                            categories: ["SSRF", "Server-Side Request Forgery"] },
+];
+
+function owaspCoverageTable(findings: Finding[]): string {
+  const foundCategories = new Set(findings.map((f) => f.category));
+  const rows = OWASP_TOP_10.map((item) => {
+    const hit = item.categories.some((c) =>
+      Array.from(foundCategories).some((fc) => fc.toLowerCase().includes(c.toLowerCase()))
+    );
+    const relatedFindings = findings.filter((f) =>
+      item.categories.some((c) => f.category.toLowerCase().includes(c.toLowerCase()))
+    );
+    const maxSev = relatedFindings.length > 0
+      ? ["critical", "high", "medium", "low", "info"].find((s) =>
+          relatedFindings.some((f) => f.severity === s)
+        ) as SeverityLevel | undefined
+      : undefined;
+    return `<tr style="border-bottom:1px solid #f3f4f6;">
+      <td style="padding:8px 12px;font-size:12px;color:#6b7280;white-space:nowrap;">${item.id}</td>
+      <td style="padding:8px 12px;font-size:13px;color:#374151;">${escapeHtml(item.name)}</td>
+      <td style="padding:8px 12px;text-align:center;">
+        ${hit
+          ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${maxSev ? SEVERITY_COLORS[maxSev] : "#dc2626"};"></span>`
+          : `<span style="font-size:11px;color:#9ca3af;">—</span>`}
+      </td>
+      <td style="padding:8px 12px;text-align:center;font-size:12px;font-weight:600;color:${relatedFindings.length > 0 ? SEVERITY_COLORS[maxSev ?? "info"] : "#9ca3af"}">
+        ${relatedFindings.length > 0 ? relatedFindings.length : "—"}
+      </td>
+    </tr>`;
+  });
+  return `
+  <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin-bottom:32px;">
+    <h2 style="font-size:16px;font-weight:700;margin:0 0 16px;color:#111827;">OWASP Top 10 Coverage</h2>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr style="background:#f9fafb;">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;">ID</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;">CATEGORY</th>
+          <th style="padding:8px 12px;text-align:center;font-size:11px;color:#6b7280;font-weight:600;">DETECTED</th>
+          <th style="padding:8px 12px;text-align:center;font-size:11px;color:#6b7280;font-weight:600;">FINDINGS</th>
+        </tr>
+      </thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+// ─── Category bar chart ────────────────────────────────────────────────────────
+
+function categoryBarChart(findings: Finding[]): string {
+  if (findings.length === 0) return "";
+  const counts: Record<string, { count: number; maxSev: SeverityLevel }> = {};
+  for (const f of findings) {
+    if (!counts[f.category]) counts[f.category] = { count: 0, maxSev: f.severity };
+    counts[f.category].count++;
+    const sevOrder: SeverityLevel[] = ["critical", "high", "medium", "low", "info"];
+    if (sevOrder.indexOf(f.severity) < sevOrder.indexOf(counts[f.category].maxSev)) {
+      counts[f.category].maxSev = f.severity;
+    }
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1].count - a[1].count).slice(0, 10);
+  const maxCount = sorted[0]?.[1].count ?? 1;
+  const bars = sorted.map(([cat, { count, maxSev }]) => `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+      <div style="width:160px;font-size:12px;color:#374151;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(cat)}">${escapeHtml(cat)}</div>
+      <div style="flex:1;background:#f3f4f6;border-radius:4px;height:20px;overflow:hidden;">
+        <div style="height:100%;background:${SEVERITY_COLORS[maxSev]};width:${(count / maxCount) * 100}%;border-radius:4px;transition:width 0.3s;"></div>
+      </div>
+      <div style="width:24px;font-size:12px;font-weight:600;color:#111827;">${count}</div>
+    </div>`).join("");
+  return `
+  <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin-bottom:32px;">
+    <h2 style="font-size:16px;font-weight:700;margin:0 0 16px;color:#111827;">Findings by Category</h2>
+    ${bars}
+  </div>`;
+}
+
+// ─── Executive summary ─────────────────────────────────────────────────────────
+
+function executiveSummary(findings: Finding[], summary: ScanResult["summary"], riskScore: number, riskLevel: string, riskColor: string): string {
+  const criticalTitles = findings.filter((f) => f.severity === "critical").map((f) => f.title).slice(0, 3);
+  const highTitles = findings.filter((f) => f.severity === "high").map((f) => f.title).slice(0, 3);
+
+  const nextSteps: string[] = [];
+  if (summary.critical > 0) nextSteps.push(`Address ${summary.critical} critical issue${summary.critical > 1 ? "s" : ""} immediately before any production deployment.`);
+  if (summary.high > 0) nextSteps.push(`Remediate ${summary.high} high-severity finding${summary.high > 1 ? "s" : ""} within 7 days.`);
+  if (summary.medium > 0) nextSteps.push(`Schedule remediation of ${summary.medium} medium-severity issue${summary.medium > 1 ? "s" : ""} within 30 days.`);
+  if (summary.total === 0) nextSteps.push("No issues found. Schedule regular scans to maintain security posture.");
+  nextSteps.push("Re-run a full scan after applying fixes to verify remediation.");
+
+  return `
+  <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin-bottom:32px;">
+    <h2 style="font-size:16px;font-weight:700;margin:0 0 16px;color:#111827;">Executive Summary</h2>
+    <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px;">
+      The security assessment identified <strong>${summary.total} finding${summary.total !== 1 ? "s" : ""}</strong> across the scanned target,
+      resulting in an overall risk score of <strong style="color:${riskColor};">${riskScore}/100 (${riskLevel})</strong>.
+      ${summary.critical > 0 ? `<span style="color:#dc2626;">There ${summary.critical === 1 ? "is" : "are"} <strong>${summary.critical} critical vulnerability${summary.critical > 1 ? " vulnerabilities" : ""}</strong> requiring immediate attention.</span>` : "No critical vulnerabilities were detected."}
+    </p>
+    ${criticalTitles.length > 0 ? `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:600;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Critical Issues</div>
+      <ul style="margin:0;padding-left:20px;">${criticalTitles.map((t) => `<li style="font-size:13px;color:#374151;margin-bottom:4px;">${escapeHtml(t)}</li>`).join("")}</ul>
+    </div>` : ""}
+    ${highTitles.length > 0 ? `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:600;color:#ea580c;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">High Severity Issues</div>
+      <ul style="margin:0;padding-left:20px;">${highTitles.map((t) => `<li style="font-size:13px;color:#374151;margin-bottom:4px;">${escapeHtml(t)}</li>`).join("")}</ul>
+    </div>` : ""}
+    <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:16px;">
+      <div style="font-size:12px;font-weight:600;color:#0369a1;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Recommended Next Steps</div>
+      <ol style="margin:0;padding-left:20px;">${nextSteps.map((s) => `<li style="font-size:13px;color:#0c4a6e;margin-bottom:4px;line-height:1.5;">${escapeHtml(s)}</li>`).join("")}</ol>
+    </div>
+  </div>`;
+}
+
 function findingCard(f: Finding, index: number): string {
   const color = SEVERITY_COLORS[f.severity];
   return `
@@ -231,6 +358,9 @@ export function generateHtmlReport(
     </div>
   </div>
 
+  <!-- Executive Summary -->
+  ${executiveSummary(findings, summary, riskScore, riskLevel, riskColor)}
+
   <!-- Risk Score + Summary -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:32px;">
     <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;display:flex;align-items:center;gap:24px;">
@@ -256,6 +386,10 @@ export function generateHtmlReport(
       <div style="font-size:11px;color:#9ca3af;margin-top:8px;">Score = Critical×20 + High×10 + Medium×5 + Low×2 + Info×1</div>
     </div>
   </div>
+
+  <!-- OWASP Coverage + Category Chart -->
+  ${owaspCoverageTable(findings)}
+  ${categoryBarChart(findings)}
 
   ${
     findings.length === 0

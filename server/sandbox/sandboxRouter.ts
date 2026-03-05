@@ -24,6 +24,8 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { generateReport } from "./reportGenerator";
 import { runScan } from "./scanner";
+import { compareScans, buildTrendSeries, type ScanSnapshot } from "./scanComparator";
+import { createNotification } from "../notificationsDb";
 
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -688,6 +690,92 @@ export const sandboxRouter = router({
 
       return { success: true };
     }),
+
+  // ─── Scan Comparison ───────────────────────────────────────────────────────
+
+  compareScans: protectedProcedure
+    .input(z.object({
+      sandboxId: z.number(),
+      baselineScanId: z.number(),
+      compareScanId: z.number(),
+    }))
+    .query(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      // Load both scans
+      const loadScan = async (scanId: number): Promise<ScanSnapshot> => {
+        const [scan] = await db
+          .select()
+          .from(sandboxScans)
+          .where(and(eq(sandboxScans.id, scanId), eq(sandboxScans.sandboxId, input.sandboxId)))
+          .limit(1);
+        if (!scan) throw new TRPCError({ code: "NOT_FOUND", message: "Scan not found: " + scanId });
+
+        const findings = await db
+          .select()
+          .from(sandboxFindings)
+          .where(eq(sandboxFindings.scanId, scanId));
+
+        const summary = (scan.summary as { critical: number; high: number; medium: number; low: number; info: number; total: number }) ?? { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 };
+        const riskScore = Math.min(100, summary.critical * 10 + summary.high * 5 + summary.medium * 2 + summary.low);
+
+        return {
+          scanId: scan.id,
+          createdAt: scan.createdAt?.toISOString() ?? new Date().toISOString(),
+          scanType: scan.scanType,
+          riskScore,
+          summary,
+          findings: findings.map((f) => ({
+            id: String(f.id),
+            title: f.title,
+            severity: f.severity as "critical" | "high" | "medium" | "low" | "info",
+            category: f.category,
+            affectedUrl: f.affectedUrl ?? undefined,
+            cvssScore: f.cvssScore ?? undefined,
+            cwe: undefined,
+            owasp: undefined,
+          })),
+        };
+      };
+
+      const [baseline, compare] = await Promise.all([
+        loadScan(input.baselineScanId),
+        loadScan(input.compareScanId),
+      ]);
+
+      return compareScans(baseline, compare);
+    }),
+
+  getScanTrend: protectedProcedure
+    .input(z.object({ sandboxId: z.number(), limit: z.number().min(2).max(20).default(10) }))
+    .query(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const scans = await db
+        .select()
+        .from(sandboxScans)
+        .where(and(eq(sandboxScans.sandboxId, input.sandboxId), eq(sandboxScans.status, "completed")))
+        .orderBy(desc(sandboxScans.createdAt))
+        .limit(input.limit);
+
+      const snapshots: ScanSnapshot[] = scans.map((s) => {
+        const summary = (s.summary as { critical: number; high: number; medium: number; low: number; info: number; total: number }) ?? { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 };
+        return {
+          scanId: s.id,
+          createdAt: s.createdAt?.toISOString() ?? new Date().toISOString(),
+          scanType: s.scanType,
+          riskScore: Math.min(100, summary.critical * 10 + summary.high * 5 + summary.medium * 2 + summary.low),
+          summary,
+          findings: [],
+        };
+      });
+
+      return buildTrendSeries(snapshots);
+    }),
 });
 
 // ─── Shared scan runner (used by create + startScan) ─────────────────────────
@@ -754,6 +842,45 @@ async function runSandboxScan(
       .update(sandboxEnvironments)
       .set({ status: "completed" })
       .where(eq(sandboxEnvironments.id, sandboxId));
+
+    // Send in-app notification to sandbox owner
+    try {
+      const [env] = await db
+        .select({ createdBy: sandboxEnvironments.createdBy, name: sandboxEnvironments.name })
+        .from(sandboxEnvironments)
+        .where(eq(sandboxEnvironments.id, sandboxId))
+        .limit(1);
+
+      if (env) {
+        const critical = result.summary.critical;
+        const high = result.summary.high;
+        const total = result.summary.total;
+        const hasCritical = critical > 0;
+        const severity = hasCritical ? "error" : high > 0 ? "warning" : total > 0 ? "info" : "success";
+        const title = hasCritical
+          ? `⚠️ Critical vulnerabilities found in "${env.name}"`
+          : high > 0
+          ? `Security scan completed — ${high} high severity issue(s) in "${env.name}"`
+          : total > 0
+          ? `Security scan completed — ${total} finding(s) in "${env.name}"`
+          : `Security scan completed — no issues found in "${env.name}"`;
+
+        const body = `Scan type: ${scanType}. Found: ${critical} critical, ${high} high, ${result.summary.medium} medium, ${result.summary.low} low, ${result.summary.info} info. Total: ${total} finding(s).`;
+
+        await createNotification({
+          userId: env.createdBy,
+          type: "security",
+          severity,
+          title,
+          body,
+          link: `/sandbox/${sandboxId}`,
+          sourceId: scanId ?? undefined,
+          sourceType: "sandbox_scan",
+        });
+      }
+    } catch {
+      // Notification failure should not break scan result
+    }
   } catch (err) {
     if (scanId) {
       await db
