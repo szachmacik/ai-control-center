@@ -125,7 +125,7 @@ describe("tasks.create", () => {
   it("allows authenticated user to create task", async () => {
     const caller = appRouter.createCaller(makeCtx());
     await expect(
-      caller.tasks.create({ title: "Test task", priority: 5 })
+      caller.tasks.create({ title: "Test task", priority: "medium" })
     ).resolves.not.toThrow();
   });
 
