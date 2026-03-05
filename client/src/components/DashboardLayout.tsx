@@ -44,6 +44,8 @@ import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Badge } from "./ui/badge";
 import NotificationCenter from "./NotificationCenter";
+import { GlobalSearch, GlobalSearchTrigger } from "./GlobalSearch";
+import { ThemeToggle } from "./ThemeToggle";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -110,6 +112,7 @@ function DashboardLayoutContent({
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const isAdmin = user?.role === "admin";
@@ -295,16 +298,24 @@ function DashboardLayoutContent({
                 {activeItem?.label ?? "Dashboard"}
               </span>
             </div>
-            <NotificationCenter />
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <NotificationCenter />
+            </div>
           </div>
         )}
         {/* Desktop topbar notification bell */}
         {!isMobile && (
-          <div className="flex border-b border-border h-14 items-center justify-end bg-background px-6 sticky top-0 z-40">
-            <NotificationCenter />
+          <div className="flex border-b border-border h-14 items-center justify-between bg-background px-6 sticky top-0 z-40">
+            <GlobalSearchTrigger onClick={() => setSearchOpen(true)} />
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <NotificationCenter />
+            </div>
           </div>
         )}
         <main className="flex-1 overflow-auto">{children}</main>
+        <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} />
       </SidebarInset>
     </>
   );

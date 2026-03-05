@@ -25,7 +25,7 @@ import { verifySupabaseToken } from "./_core/supabaseAuth";
 import { sdk } from "./_core/sdk";
 import * as db from "./db";
 import {
-  listAgents, updateAgentStatus,
+  listAgents, updateAgentStatus, getAgentById, getAgentTasks, incrementAgentTasksCompleted,
   listTasks, createTask, updateTaskStatus, addTaskLog, getTaskLogs, addDriveFile, getDriveFiles,
   listInfrastructure, seedInfrastructure, seedAgents,
   listSecrets, createSecret, deleteSecret,
@@ -84,12 +84,21 @@ export const appRouter = router({
 
   agents: router({
     list: protectedProcedure.query(() => listAgents()),
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(({ input }) => getAgentById(input.id)),
+    getTasks: protectedProcedure
+      .input(z.object({ agentId: z.number(), limit: z.number().optional() }))
+      .query(({ input }) => getAgentTasks(input.agentId, input.limit)),
     updateStatus: adminProcedure
       .input(z.object({
         id: z.number(),
         status: z.enum(["active", "idle", "offline", "error"]),
       }))
       .mutation(({ input }) => updateAgentStatus(input.id, input.status)),
+    incrementTasksCompleted: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => incrementAgentTasksCompleted(input.id)),
   }),
 
   tasks: router({

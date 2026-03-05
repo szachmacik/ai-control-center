@@ -111,6 +111,24 @@ export async function updateAgentStatus(id: number, status: Agent["status"]) {
   if (!db) return;
   await db.update(agents).set({ status, lastActive: new Date() }).where(eq(agents.id, id));
 }
+export async function getAgentById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [agent] = await db.select().from(agents).where(eq(agents.id, id)).limit(1);
+  return agent ?? null;
+}
+export async function getAgentTasks(agentId: number, limit = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tasks).where(eq(tasks.agentId, agentId)).orderBy(desc(tasks.createdAt)).limit(limit);
+}
+export async function incrementAgentTasksCompleted(id: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.execute(
+    `UPDATE agents SET tasks_completed = tasks_completed + 1, last_active = NOW(), updatedAt = NOW() WHERE id = ${id}`
+  );
+}
 
 export async function seedAgents() {
   const db = await getDb();
