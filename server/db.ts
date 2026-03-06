@@ -158,6 +158,72 @@ export async function seedAgents() {
   return items.length;
 }
 
+export async function createAgent(data: {
+  name: string;
+  role?: string;
+  description?: string;
+  model?: string;
+  status?: Agent["status"];
+  agentType?: "manus" | "n8n" | "autogpt" | "crewai" | "custom";
+  mcpEndpoint?: string;
+  driveFolderId?: string;
+  driveFolderUrl?: string;
+  apiKey?: string;
+  config?: Record<string, unknown>;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [result] = await db.insert(agents).values({
+    name: data.name,
+    role: data.role ?? null,
+    description: data.description ?? null,
+    model: data.model ?? null,
+    status: data.status ?? "idle",
+    agentType: data.agentType ?? "custom",
+    mcpEndpoint: data.mcpEndpoint ?? null,
+    driveFolderId: data.driveFolderId ?? null,
+    driveFolderUrl: data.driveFolderUrl ?? null,
+    apiKey: data.apiKey ?? null,
+    config: data.config ?? null,
+    lastActive: new Date(),
+  });
+  return result;
+}
+
+export async function updateAgent(id: number, data: {
+  name?: string;
+  role?: string;
+  description?: string;
+  model?: string;
+  status?: Agent["status"];
+  agentType?: "manus" | "n8n" | "autogpt" | "crewai" | "custom";
+  mcpEndpoint?: string;
+  driveFolderId?: string;
+  driveFolderUrl?: string;
+  config?: Record<string, unknown>;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.update(agents).set({
+    ...(data.name !== undefined && { name: data.name }),
+    ...(data.role !== undefined && { role: data.role }),
+    ...(data.description !== undefined && { description: data.description }),
+    ...(data.model !== undefined && { model: data.model }),
+    ...(data.status !== undefined && { status: data.status }),
+    ...(data.agentType !== undefined && { agentType: data.agentType }),
+    ...(data.mcpEndpoint !== undefined && { mcpEndpoint: data.mcpEndpoint }),
+    ...(data.driveFolderId !== undefined && { driveFolderId: data.driveFolderId }),
+    ...(data.driveFolderUrl !== undefined && { driveFolderUrl: data.driveFolderUrl }),
+    ...(data.config !== undefined && { config: data.config }),
+  }).where(eq(agents.id, id));
+}
+
+export async function deleteAgent(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.delete(agents).where(eq(agents.id, id));
+}
+
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
 export async function listTasks() {
@@ -230,9 +296,52 @@ export async function seedInfrastructure() {
   }
   return items.length;
 }
+export async function checkInfrastructureHealth(): Promise<{ id: number; name: string; url: string | null; status: "healthy" | "degraded" | "offline" | "unknown"; latencyMs: number | null }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const items = await db.select().from(infrastructure);
+  const results: { id: number; name: string; url: string | null; status: "healthy" | "degraded" | "offline" | "unknown"; latencyMs: number | null }[] = [];
 
-// ─── Secrets ─────────────────────────────────────────────────────────────────
+  for (const item of items) {
+    if (!item.url) {
+      results.push({ id: item.id, name: item.name, url: null, status: "unknown", latencyMs: null });
+      continue;
+    }
+    // Skip external services (Cloudflare, DigitalOcean, Supabase) — they don't have a /health endpoint we can reach
+    const isExternal = item.url.includes("cloudflare.com") || item.url.includes("digitalocean.com") || item.url.includes("supabase.com");
+    if (isExternal) {
+      results.push({ id: item.id, name: item.name, url: item.url, status: "healthy", latencyMs: null });
+      continue;
+    }
+    const start = Date.now();
+    let newStatus: "healthy" | "degraded" | "offline" | "unknown" = "unknown";
+    let latencyMs: number | null = null;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(item.url, { method: "HEAD", signal: controller.signal, redirect: "follow" });
+      clearTimeout(timeout);
+      latencyMs = Date.now() - start;
+      if (res.ok || res.status < 400) {
+        newStatus = latencyMs > 3000 ? "degraded" : "healthy";
+      } else if (res.status < 500) {
+        // 4xx — service is up but auth required, counts as healthy
+        newStatus = "healthy";
+      } else {
+        newStatus = "degraded";
+      }
+    } catch {
+      latencyMs = Date.now() - start;
+      newStatus = "offline";
+    }
+    // Update DB
+    await db.update(infrastructure).set({ status: newStatus, lastChecked: new Date() }).where(eq(infrastructure.id, item.id));
+    results.push({ id: item.id, name: item.name, url: item.url, status: newStatus, latencyMs });
+  }
+  return results;
+}
 
+// ─── Secrets ───────────────────────────────────────────────────────────────────
 export async function listSecrets() {
   const db = await getDb();
   if (!db) return [];

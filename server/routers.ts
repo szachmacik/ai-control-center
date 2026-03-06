@@ -25,8 +25,9 @@ import { sdk } from "./_core/sdk";
 import * as db from "./db";
 import {
   listAgents, updateAgentStatus, getAgentById, getAgentTasks, incrementAgentTasksCompleted,
+  createAgent, updateAgent, deleteAgent,
   listTasks, createTask, updateTaskStatus, addTaskLog, getTaskLogs, addDriveFile, getDriveFiles,
-  listInfrastructure, seedInfrastructure, seedAgents,
+  listInfrastructure, seedInfrastructure, seedAgents, checkInfrastructureHealth,
   listSecrets, createSecret, deleteSecret,
   listLogs,
   listProjects, createProject,
@@ -98,6 +99,36 @@ export const appRouter = router({
     incrementTasksCompleted: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => incrementAgentTasksCompleted(input.id)),
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        role: z.string().optional(),
+        description: z.string().optional(),
+        model: z.string().optional(),
+        status: z.enum(["active", "idle", "offline", "error"]).optional(),
+        agentType: z.enum(["manus", "n8n", "autogpt", "crewai", "custom"]).optional(),
+        mcpEndpoint: z.string().url().optional().or(z.literal("")),
+        driveFolderUrl: z.string().url().optional().or(z.literal("")),
+        config: z.record(z.string(), z.unknown()).optional(),
+      }))
+      .mutation(({ input }) => createAgent(input)),
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1).optional(),
+        role: z.string().optional(),
+        description: z.string().optional(),
+        model: z.string().optional(),
+        status: z.enum(["active", "idle", "offline", "error"]).optional(),
+        agentType: z.enum(["manus", "n8n", "autogpt", "crewai", "custom"]).optional(),
+        mcpEndpoint: z.string().optional(),
+        driveFolderUrl: z.string().optional(),
+        config: z.record(z.string(), z.unknown()).optional(),
+      }))
+      .mutation(({ input }) => { const { id, ...data } = input; return updateAgent(id, data); }),
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => deleteAgent(input.id)),
   }),
 
   tasks: router({
@@ -170,6 +201,8 @@ export const appRouter = router({
         url.searchParams.set("sso_token", token);
         return { launchUrl: url.toString(), expiresIn: 300 };
       }),
+    // Real-time health check — pings all services and updates DB status
+    checkHealth: adminProcedure.mutation(() => checkInfrastructureHealth()),
   }),
 
   secrets: router({

@@ -49,6 +49,17 @@ export default function Infrastructure() {
     onError: (err) => toast.error(`Seed failed: ${err.message}`),
   });
   const getLaunchToken = trpc.infrastructure.getLaunchToken.useMutation();
+  const checkHealth = trpc.infrastructure.checkHealth.useMutation({
+    onSuccess: (results) => {
+      const offline = results.filter((r: any) => r.status === "offline").length;
+      const degraded = results.filter((r: any) => r.status === "degraded").length;
+      if (offline > 0) toast.error(`Health check: ${offline} service(s) offline`);
+      else if (degraded > 0) toast.warning(`Health check: ${degraded} service(s) degraded`);
+      else toast.success(`All ${results.length} services healthy`);
+      refetch();
+    },
+    onError: (err) => toast.error(`Health check failed: ${err.message}`),
+  });
   const [launching, setLaunching] = useState<number | null>(null);
 
   const uptimeMap = new Map<number, { upPct: number; avgMs: number }>();
@@ -103,6 +114,10 @@ export default function Infrastructure() {
               Seed Services
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={() => checkHealth.mutate()} disabled={checkHealth.isPending} className="gap-2 border-border text-muted-foreground hover:text-foreground">
+            {checkHealth.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+            Check Health
+          </Button>
           <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2 border-border text-muted-foreground hover:text-foreground">
             <RefreshCw className="w-3.5 h-3.5" />
             Refresh

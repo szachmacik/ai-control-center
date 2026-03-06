@@ -21,6 +21,21 @@ vi.mock("./db", () => ({
   }),
   upsertUser: vi.fn().mockResolvedValue(undefined),
   getUserByOpenId: vi.fn().mockResolvedValue(undefined),
+  getAgentById: vi.fn().mockResolvedValue(null),
+  getAgentTasks: vi.fn().mockResolvedValue([]),
+  incrementAgentTasksCompleted: vi.fn().mockResolvedValue(undefined),
+  createAgent: vi.fn().mockResolvedValue(undefined),
+  updateAgent: vi.fn().mockResolvedValue(undefined),
+  deleteAgent: vi.fn().mockResolvedValue(undefined),
+  updateTaskStatus: vi.fn().mockResolvedValue(undefined),
+  addTaskLog: vi.fn().mockResolvedValue(undefined),
+  getTaskLogs: vi.fn().mockResolvedValue([]),
+  addDriveFile: vi.fn().mockResolvedValue(undefined),
+  getDriveFiles: vi.fn().mockResolvedValue([]),
+  seedInfrastructure: vi.fn().mockResolvedValue(5),
+  seedAgents: vi.fn().mockResolvedValue(4),
+  checkInfrastructureHealth: vi.fn().mockResolvedValue([]),
+  getUptimeSummary: vi.fn().mockResolvedValue([]),
 }));
 
 function makeCtx(role: "admin" | "user" = "user"): TrpcContext {
@@ -150,5 +165,78 @@ describe("projects.create (admin only)", () => {
     await expect(
       caller.projects.create({ name: "my-app", template: "web-app" })
     ).rejects.toThrow("Admin access required");
+  });
+});
+
+describe("agents.create (admin only)", () => {
+  it("allows admin to create an agent", async () => {
+    const caller = appRouter.createCaller(makeCtx("admin"));
+    await expect(
+      caller.agents.create({ name: "Test Bot", role: "monitor", agentType: "custom", status: "idle" })
+    ).resolves.not.toThrow();
+  });
+  it("throws FORBIDDEN for non-admin user", async () => {
+    const caller = appRouter.createCaller(makeCtx("user"));
+    await expect(
+      caller.agents.create({ name: "Test Bot" })
+    ).rejects.toThrow("Admin access required");
+  });
+  it("throws for empty name", async () => {
+    const caller = appRouter.createCaller(makeCtx("admin"));
+    await expect(
+      caller.agents.create({ name: "" })
+    ).rejects.toThrow();
+  });
+  it("accepts all agent types", async () => {
+    const caller = appRouter.createCaller(makeCtx("admin"));
+    for (const agentType of ["manus", "n8n", "autogpt", "crewai", "custom"] as const) {
+      await expect(
+        caller.agents.create({ name: `${agentType} agent`, agentType })
+      ).resolves.not.toThrow();
+    }
+  });
+});
+
+describe("agents.update (admin only)", () => {
+  it("allows admin to update an agent", async () => {
+    const caller = appRouter.createCaller(makeCtx("admin"));
+    await expect(
+      caller.agents.update({ id: 1, name: "Updated Bot", status: "active" })
+    ).resolves.not.toThrow();
+  });
+  it("throws FORBIDDEN for non-admin user", async () => {
+    const caller = appRouter.createCaller(makeCtx("user"));
+    await expect(
+      caller.agents.update({ id: 1, name: "Updated Bot" })
+    ).rejects.toThrow("Admin access required");
+  });
+});
+
+describe("agents.delete (admin only)", () => {
+  it("allows admin to delete an agent", async () => {
+    const caller = appRouter.createCaller(makeCtx("admin"));
+    await expect(
+      caller.agents.delete({ id: 999 })
+    ).resolves.not.toThrow();
+  });
+  it("throws FORBIDDEN for non-admin user", async () => {
+    const caller = appRouter.createCaller(makeCtx("user"));
+    await expect(
+      caller.agents.delete({ id: 1 })
+    ).rejects.toThrow("Admin access required");
+  });
+});
+
+describe("infrastructure.checkHealth (admin only)", () => {
+  it("throws FORBIDDEN for non-admin user", async () => {
+    const caller = appRouter.createCaller(makeCtx("user"));
+    await expect(
+      caller.infrastructure.checkHealth()
+    ).rejects.toThrow("Admin access required");
+  });
+  it("allows admin to trigger health check", async () => {
+    const caller = appRouter.createCaller(makeCtx("admin"));
+    const result = await caller.infrastructure.checkHealth();
+    expect(Array.isArray(result)).toBe(true);
   });
 });

@@ -4,13 +4,26 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
 import {
   Bot, Play, Square, RefreshCw, ChevronRight, Cpu, Brain,
   FolderOpen, Zap, Network, Sparkles, ExternalLink, Activity,
-  CheckCircle2, XCircle, Clock, AlertCircle, Info, Hash,
+  CheckCircle2, XCircle, Clock, AlertCircle, Info, Hash, Plus, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -178,7 +191,51 @@ function AgentDetailSheet({ agentId, open, onClose }: { agentId: number | null; 
   );
 }
 
-function AgentCard({ agent, onSelect, updateStatus }: { agent: any; onSelect: (id: number) => void; updateStatus: any }) {
+function CreateAgentDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({ name: "", role: "", description: "", model: "", agentType: "custom" as string, mcpEndpoint: "", status: "idle" as string });
+  const create = trpc.agents.create.useMutation({
+    onSuccess: () => { toast.success("Agent created"); onCreated(); onClose(); setForm({ name: "", role: "", description: "", model: "", agentType: "custom", mcpEndpoint: "", status: "idle" }); },
+    onError: (e) => toast.error(e.message),
+  });
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="w-4 h-4" />New Agent</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label className="text-xs">Name *</Label><Input className="mt-1" placeholder="My Agent" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label className="text-xs">Role</Label><Input className="mt-1" placeholder="monitor" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} /></div>
+            <div><Label className="text-xs">Model</Label><Input className="mt-1" placeholder="gpt-4o-mini" value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))} /></div>
+          </div>
+          <div><Label className="text-xs">Description</Label><Textarea className="mt-1 resize-none" rows={2} placeholder="What does this agent do?" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label className="text-xs">Type</Label>
+              <Select value={form.agentType} onValueChange={v => setForm(f => ({ ...f, agentType: v }))}>
+                <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>{["manus","n8n","autogpt","crewai","custom"].map(t => <SelectItem key={t} value={t} className="text-xs capitalize">{t}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label className="text-xs">Initial Status</Label>
+              <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
+                <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>{["active","idle","offline","error"].map(s => <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div><Label className="text-xs">MCP Endpoint (optional)</Label><Input className="mt-1" placeholder="https://mcp.example.com/agent" value={form.mcpEndpoint} onChange={e => setForm(f => ({ ...f, mcpEndpoint: e.target.value }))} /></div>
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" disabled={!form.name || create.isPending} onClick={() => create.mutate({ name: form.name, role: form.role || undefined, description: form.description || undefined, model: form.model || undefined, agentType: form.agentType as any, status: form.status as any, mcpEndpoint: form.mcpEndpoint || undefined })}>
+            {create.isPending ? "Creating…" : "Create Agent"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AgentCard({ agent, onSelect, updateStatus, onDelete }: { agent: any; onSelect: (id: number) => void; updateStatus: any; onDelete: (id: number) => void }) {
   const agentType = agent.agentType ?? "custom";
   return (
     <Card className="bg-card border-border hover:border-border/80 transition-all">
@@ -231,6 +288,9 @@ function AgentCard({ agent, onSelect, updateStatus }: { agent: any; onSelect: (i
           <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground" onClick={() => onSelect(agent.id)}>
             <ChevronRight className="w-4 h-4" />
           </Button>
+          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => onDelete(agent.id)}>
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
         </div>
         {agent.lastActive && (
           <p className="text-[10px] text-muted-foreground/60">Last active: {new Date(agent.lastActive).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" })}</p>
@@ -242,10 +302,16 @@ function AgentCard({ agent, onSelect, updateStatus }: { agent: any; onSelect: (i
 
 export default function Agents() {
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
   const { data: agents, isLoading, refetch } = trpc.agents.list.useQuery(undefined, { refetchInterval: 10_000 });
   const { data: secrets } = trpc.secrets.list.useQuery();
   const updateStatus = trpc.agents.updateStatus.useMutation({
     onSuccess: () => { refetch(); toast.success("Agent status updated"); },
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteAgent = trpc.agents.delete.useMutation({
+    onSuccess: () => { refetch(); toast.success("Agent deleted"); setDeleteId(null); },
     onError: (e) => toast.error(e.message),
   });
   const hasSecret = (key: string) => secrets?.some((s: any) => s.name === key);
@@ -253,7 +319,7 @@ export default function Agents() {
   const customAgents = agents?.filter((a: any) => !["manus", "n8n", "autogpt", "crewai"].includes(a.agentType)) ?? [];
   const activeCount = agents?.filter((a: any) => a.status === "active").length ?? 0;
   const totalTasks = agents?.reduce((sum: number, a: any) => sum + (a.tasksCompleted ?? 0), 0) ?? 0;
-
+  const agentToDelete = agents?.find((a: any) => a.id === deleteId);
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
@@ -261,9 +327,14 @@ export default function Agents() {
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Bot className="w-6 h-6 text-primary" />Agents</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Live status · auto-refreshes every 10s · {activeCount} active · {totalTasks} tasks done</p>
         </div>
-        <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => refetch()}>
-          <RefreshCw className="w-3.5 h-3.5" />Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Plus className="w-3.5 h-3.5" />New Agent
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => refetch()}>
+            <RefreshCw className="w-3.5 h-3.5" />Refresh
+          </Button>
+        </div>
       </div>
 
       <section>
@@ -296,7 +367,7 @@ export default function Agents() {
             <section>
               <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2"><Brain className="w-3.5 h-3.5" />AI Agents</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {aiAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} />)}
+                {aiAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} onDelete={setDeleteId} />)}
               </div>
             </section>
           )}
@@ -304,7 +375,7 @@ export default function Agents() {
             <section>
               <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2"><Bot className="w-3.5 h-3.5" />Custom Agents</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {customAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} />)}
+                {customAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} onDelete={setDeleteId} />)}
               </div>
             </section>
           )}
@@ -316,6 +387,21 @@ export default function Agents() {
         </>
       )}
       <AgentDetailSheet agentId={selectedAgentId} open={!!selectedAgentId} onClose={() => setSelectedAgentId(null)} />
+      <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={refetch} />
+      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Agent</AlertDialogTitle>
+            <AlertDialogDescription>Are you sure you want to delete <strong>{agentToDelete?.name}</strong>? This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteId && deleteAgent.mutate({ id: deleteId })} disabled={deleteAgent.isPending}>
+              {deleteAgent.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
