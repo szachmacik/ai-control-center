@@ -230,6 +230,33 @@ export default function SandboxDetail() {
     { enabled: !!sandboxId }
   );
 
+  const { refetch: refetchExport } = trpc.sandbox.exportFindings.useQuery(
+    { sandboxId, severity: severityFilter as any },
+    { enabled: false }
+  );
+
+  const handleExportCsv = async () => {
+    try {
+      const result = await refetchExport();
+      if (result.data && result.data.csv) {
+        const blob = new Blob([result.data.csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = result.data.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast.success(`Exported ${result.data.count} findings to CSV`);
+      } else {
+        toast.info("No findings to export");
+      }
+    } catch {
+      toast.error("Failed to export CSV");
+    }
+  };
+
   const startScanMutation = trpc.sandbox.startScan.useMutation({
     onSuccess: (data) => {
       setActiveScanId(data.scanId);
@@ -607,6 +634,15 @@ export default function SandboxDetail() {
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Clear filters
+                </button>
+              )}
+              {displayFindings.length > 0 && (
+                <button
+                  onClick={handleExportCsv}
+                  className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+                >
+                  <FileDown className="h-3 w-3" />
+                  Export CSV
                 </button>
               )}
             </div>

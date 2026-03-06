@@ -171,6 +171,8 @@ function StatsCard({
 export default function SandboxList() {
   const [, setLocation] = useLocation();
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const { data: sandboxes, isLoading, refetch } = trpc.sandbox.list.useQuery(undefined, {
     refetchInterval: (query) => {
@@ -185,10 +187,38 @@ export default function SandboxList() {
     onError: (err) => toast.error(err.message),
   });
 
+  const bulkDeleteMutation = trpc.sandbox.bulkDelete.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Deleted ${data.succeeded} sandbox${data.succeeded !== 1 ? "es" : ""}${data.failed > 0 ? ` (${data.failed} failed)` : ""}`);
+      setSelectedIds(new Set());
+      setIsBulkDeleting(false);
+      refetch();
+    },
+    onError: (err) => {
+      toast.error(err.message);
+      setIsBulkDeleting(false);
+    },
+  });
+
   const downloadMutation = trpc.sandbox.getDownloadPath.useMutation({
     onSuccess: (data) => toast.success(`ZIP ready: ${(data as any).filename}`),
     onError: (err) => toast.error(err.message),
   });
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (ids: number[]) => {
+    setSelectedIds((prev) => {
+      if (ids.every((id) => prev.has(id))) return new Set();
+      return new Set(ids);
+    });
+  };
 
   // ─── Global stats ──────────────────────────────────────────────────────────
 
@@ -298,6 +328,56 @@ export default function SandboxList() {
         </div>
       )}
 
+      {/* Bulk action toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 p-3 rounded-lg border border-destructive/30 bg-destructive/5">
+          <span className="text-sm text-foreground font-medium">{selectedIds.size} selected</span>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs text-muted-foreground"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear selection
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  disabled={isBulkDeleting}
+                >
+                  {isBulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  Delete {selectedIds.size}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {selectedIds.size} sandbox{selectedIds.size !== 1 ? "es" : ""}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete {selectedIds.size} sandbox{selectedIds.size !== 1 ? "es" : ""} and all associated scan results.
+                    This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      setIsBulkDeleting(true);
+                      bulkDeleteMutation.mutate({ ids: Array.from(selectedIds) });
+                    }}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Delete all
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </div>
+      )}
       {/* Filter tabs */}
       {totalCount > 0 && filterTabs.length > 2 && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -352,7 +432,7 @@ export default function SandboxList() {
             return (
               <Card
                 key={sandbox.id}
-                className="border-border bg-card hover:border-primary/30 transition-colors cursor-pointer group"
+                className={`border-border bg-card hover:border-primary/30 transition-colors cursor-pointer group ${selectedIds.has(sandbox.id) ? "ring-2 ring-primary/40 border-primary/40" : ""}`}
                 onClick={() => setLocation(`/sandbox/${sandbox.id}`)}
               >
                 <CardContent className="p-5">
@@ -360,6 +440,23 @@ export default function SandboxList() {
                     <div className="flex-1 min-w-0">
                       {/* Title row */}
                       <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
+                        {/* Checkbox for bulk select */}
+                        <div
+                          className="shrink-0"
+                          onClick={(e) => { e.stopPropagation(); toggleSelect(sandbox.id); }}
+                        >
+                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                            selectedIds.has(sandbox.id)
+                              ? "bg-primary border-primary"
+                              : "border-border bg-transparent hover:border-primary/60"
+                          }`}>
+                            {selectedIds.has(sandbox.id) && (
+                              <svg className="w-2.5 h-2.5 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
                         <h3 className="font-semibold text-foreground truncate">{sandbox.name}</h3>
                         <StatusBadge status={sandbox.status} />
                         {sandbox.anonymized && (

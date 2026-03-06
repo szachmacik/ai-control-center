@@ -488,6 +488,88 @@ export const sandboxRouter = router({
         .orderBy(desc(sandboxFindings.createdAt));
     }),
 
+  // ── Export findings as CSV ──────────────────────────────────────────────────
+  exportFindings: protectedProcedure
+    .input(z.object({
+      sandboxId: z.number(),
+      scanId: z.number().optional(),
+      severity: z.enum(["all", "critical", "high", "medium", "low", "info"]).default("all"),
+    }))
+    .query(async ({ input, ctx }) => {
+      const { sandbox } = await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      const db = await getDb();
+      if (!db) return { csv: "", count: 0, filename: "findings.csv" };
+
+      const findings = await db
+        .select()
+        .from(sandboxFindings)
+        .where(eq(sandboxFindings.sandboxId, input.sandboxId))
+        .orderBy(desc(sandboxFindings.createdAt));
+
+      // Filter by scan/severity
+      const filtered = findings.filter((f) => {
+        if (input.scanId && f.scanId !== input.scanId) return false;
+        if (input.severity !== "all" && f.severity !== input.severity) return false;
+        return true;
+      });
+
+      // Build CSV
+      const headers = ["ID", "Severity", "Category", "Title", "Description", "Evidence", "Affected URL", "Remediation", "CVSS Score", "Created At"];
+      const escape = (v: string | null | undefined): string => {
+        if (v == null) return "";
+        const s = String(v).replace(/"/g, '""');
+        return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s}"` : s;
+      };
+      const rows = filtered.map((f) => [
+        f.id,
+        f.severity,
+        f.category,
+        escape(f.title),
+        escape(f.description),
+        escape(f.evidence),
+        escape(f.affectedUrl),
+        escape(f.remediation),
+        f.cvssScore ?? "",
+        f.createdAt?.toISOString() ?? "",
+      ].join(","));
+
+      const csv = [headers.join(","), ...rows].join("\n");
+      const safeName = sandbox.name.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+      return {
+        csv,
+        count: filtered.length,
+        filename: `sentinel-findings-${safeName}-${new Date().toISOString().split("T")[0]}.csv`,
+      };
+    }),
+
+  // ── Bulk delete sandboxes ──────────────────────────────────────────────────
+  bulkDelete: protectedProcedure
+    .input(z.object({ ids: z.array(z.number()).min(1).max(20) }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const results: { id: number; success: boolean; error?: string }[] = [];
+
+      for (const id of input.ids) {
+        try {
+          await getSandboxOrThrow(id, ctx.user.id);
+          await teardownSandbox(id);
+          await deleteSandboxFiles(id).catch(() => {});
+          await db.delete(sandboxFindings).where(eq(sandboxFindings.sandboxId, id));
+          await db.delete(sandboxScans).where(eq(sandboxScans.sandboxId, id));
+          await db.delete(sandboxEnvironments).where(eq(sandboxEnvironments.id, id));
+          results.push({ id, success: true });
+        } catch (err) {
+          results.push({ id, success: false, error: err instanceof Error ? err.message : "Unknown error" });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.success).length;
+      const failed = results.filter((r) => !r.success).length;
+      return { results, succeeded, failed };
+    }),
+
   // ── Extend TTL of a running sandbox ───────────────────────────────────────────
   extendTTL: protectedProcedure
     .input(z.object({ id: z.number(), extraMinutes: z.number().min(5).max(480).default(60) }))
