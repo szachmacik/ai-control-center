@@ -27,12 +27,42 @@
 
 ## Backend
 - [x] tRPC routers for all features (agents, tasks, infra, secrets, logs, projects, dashboard)
-- [x] Vitest tests (17 tests passing)
+- [x] Vitest tests (276 tests passing — 100% pass rate)
 
 ## Deployment
 - [ ] GitHub repo creation
 - [ ] Coolify deployment on ai-control-center.ofshore.dev
 - [x] Supabase env vars configured
+
+## Sentinel — Security Sandbox (ukończone)
+- [x] Klonowanie stron (wget --mirror, max 50MB, 3 poziomy)
+- [x] Detekcja technologii (WordPress, Next.js, Laravel, Django, Rails, Express, Nuxt, Gatsby...)
+- [x] Anonimizacja PII (emaile, telefony, NIP, PESEL, IBAN, karty)
+- [x] Docker environment generator (Dockerfile + docker-compose.yml)
+- [x] Skanery bezpieczeństwa: passive, headers, ssl, csrf, xss, sqli, open_redirect, full
+- [x] NVD CVE lookup z cache 24h i rate limiterem (5 req/30s)
+- [x] Risk score (0-100) na podstawie CVSS
+- [x] Raport HTML (generowany server-side)
+- [x] ZIP download sandbox
+- [x] TTL management (auto-teardown po 24h)
+- [x] Port allocation (dynamiczne porty 3100-3199)
+- [x] Scan history (wiele skanów per sandbox)
+- [x] Findings z CVSS, CWE, OWASP, remediation
+- [x] getScanTrend — trend bezpieczeństwa w czasie
+- [x] **NOWE: exportFindings CSV** (10 kolumn, filtr severity/scanId, blob download)
+- [x] **NOWE: bulkDelete** (checkbox selection + toolbar, max 20 sandboxów naraz)
+- [x] **NOWE: lifecycle.test.ts** (85 testów: port allocation, TTL, teardown, concurrent)
+- [x] **NOWE: nvdLookup.test.ts** (49 testów: cache, rate limiter, CSV escape, severity mapping)
+
+## Sentinel — TODO
+- [ ] Scan scheduling (cron — uruchamiaj skan co tydzień automatycznie)
+- [ ] Slack/email notification po zakończeniu skanu
+- [ ] Diff scans — porównaj dwa skany i pokaż nowe/usunięte findings
+- [ ] Severity trend chart (Chart.js — linia czasu severity w SandboxDetail)
+- [ ] SARIF export (GitHub Code Scanning format)
+- [ ] API key auth dla zewnętrznych klientów (Sentinel jako SaaS)
+- [ ] Webhook na zakończenie skanu (POST do URL użytkownika)
+- [ ] Integracja z GitHub Actions (uruchom skan na PR)
 
 ## Fixes & Enhancements (Mar 3)
 - [ ] Fix Settings 404 - create Settings page and add route

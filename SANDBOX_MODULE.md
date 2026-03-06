@@ -203,12 +203,17 @@ server/sandbox/
 ├── env-generator.ts      # Generator docker-compose.yml per stos
 ├── cloner.ts             # Klonowanie wget + anonimizacja PII
 ├── scanner.ts            # Silnik skanowania bezpieczeństwa
-└── sandboxRouter.ts      # tRPC router (API endpoints)
+├── lifecycle.ts          # Port allocation, TTL management, teardown
+├── nvdLookup.ts          # NVD CVE lookup z cache 24h i rate limiterem
+├── sandboxRouter.ts      # tRPC router (API endpoints)
+├── lifecycle.test.ts     # 85 testów: port allocation, TTL, teardown, concurrent
+├── nvdLookup.test.ts     # 49 testów: cache, rate limiter, CSV escape, severity
+└── cloner.test.ts        # 42 testy: klonowanie, anonimizacja PII
 
 client/src/pages/
-├── SandboxList.tsx        # Lista sandboxów z podsumowaniem skanów
+├── SandboxList.tsx        # Lista sandboxów + checkbox bulk select + toolbar
 ├── SandboxNew.tsx         # Formularz tworzenia + detekcja technologii
-└── SandboxDetail.tsx      # Szczegóły + wyniki skanowania + historia
+└── SandboxDetail.tsx      # Szczegóły + wyniki + historia + Export CSV
 
 drizzle/
 ├── schema.ts              # Tabele: sandboxEnvironments, sandboxScans, sandboxFindings
@@ -227,4 +232,32 @@ drizzle/
 
 ---
 
-*Wygenerowano: 2026-03-04 | AI Control Center — Security Sandbox Module*
+## Nowe funkcjonalności (2026-03-06)
+
+### Export CSV findings
+- Endpoint: `sandbox.exportFindings` (tRPC query)
+- Parametry: `sandboxId`, `severity` (filtr: all/critical/high/medium/low/info), `scanId` (opcjonalny)
+- Zwraca CSV z 10 kolumnami: ID, Severity, Category, Title, Description, Evidence, Affected URL, Remediation, CVSS Score, Created At
+- Filename: `sentinel-findings-{sandbox-name}-{YYYY-MM-DD}.csv`
+- UI: przycisk **Export CSV** w sekcji findings (respektuje aktywny filtr severity)
+
+### Bulk Delete sandboxów
+- Endpoint: `sandbox.bulkDelete` (tRPC mutation)
+- Parametry: `ids: number[]` (max 20 sandboxów)
+- Wykonuje: teardown Docker + delete files + delete DB records (findings, scans, sandbox)
+- Zwraca: `{ results: [{id, success, error?}], succeeded, failed }`
+- UI: checkbox na każdej karcie sandboxa + sticky toolbar z licznikiem + AlertDialog potwierdzającym
+
+### Pokrycie testami (276 testów, 100% pass rate)
+
+| Plik testów | Testy | Zakres |
+|---|---|---|
+| `lifecycle.test.ts` | 85 | Port allocation, TTL, teardown, concurrent access |
+| `nvdLookup.test.ts` | 49 | Cache, rate limiter, CSV escape, severity mapping |
+| `cloner.test.ts` | 42 | Klonowanie, anonimizacja PII, tech detection |
+| Pozostałe | 100 | Router, auth, scanner, DB |
+| **Łącznie** | **276** | **100% pass rate** |
+
+---
+
+*Zaktualizowano: 2026-03-06 | AI Control Center — Security Sandbox Module*
