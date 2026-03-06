@@ -43,6 +43,13 @@
       "when": 1741240000000,
       "tag": "0005_meta_ads_capi",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1741326000000,
+      "tag": "0006_manychat_webpush_prefs",
+      "breakpoints": true
     }
   ]
 }

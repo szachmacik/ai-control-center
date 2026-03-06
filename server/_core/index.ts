@@ -18,6 +18,10 @@ import {
   handleManychatWebhook,
 } from "../manusApi";
 import { startScheduleWorker } from "../sandbox/scheduleWorker";
+import {
+  handleManyChatVerification,
+  handleManyChatWebhook as handleManyChatWebhookPost,
+} from "../meta/manychatWebhook";
 
 // SEC-011 FIX: Import helmet for security headers
 // Run: pnpm add helmet @types/helmet
@@ -213,6 +217,9 @@ async function startServer() {
   app.post("/api/marketing/fb-event", handleFbCapiEvent);
   // ManyChat flows send webhook events here (auth: x-manychat-secret header)
   app.post("/api/marketing/manychat", handleManychatWebhook);
+  // New ManyChat webhook endpoint (Sentinel meta module)
+  app.get("/api/webhooks/manychat", handleManyChatVerification);
+  app.post("/api/webhooks/manychat", handleManyChatWebhookPost);
 
   // ─── tRPC API ─────────────────────────────────────────────────────────────
   app.use(

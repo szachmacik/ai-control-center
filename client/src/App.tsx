@@ -20,6 +20,7 @@ import SandboxList from "./pages/SandboxList";
 import SandboxNew from "./pages/SandboxNew";
 import SandboxDetail from "./pages/SandboxDetail";
 import MetaAds from "./pages/MetaAds";
+import SandboxCompare from "./pages/SandboxCompare";
 import DashboardLayout from "./components/DashboardLayout";
 import AuthCallback from "./pages/AuthCallback";
 import { Loader2 } from "lucide-react";
@@ -63,6 +64,7 @@ function Router() {
       <Route path="/sandbox" component={() => <ProtectedRoute component={SandboxList} />} />
       <Route path="/sandbox/new" component={() => <ProtectedRoute component={SandboxNew} />} />
       <Route path="/sandbox/:id" component={() => <ProtectedRoute component={SandboxDetail} />} />
+      <Route path="/sandbox-compare" component={() => <ProtectedRoute component={SandboxCompare} />} />
       <Route path="/meta-ads" component={() => <ProtectedRoute component={MetaAds} />} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

@@ -44,6 +44,31 @@ export const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const HEALTH_CHECK_TIMEOUT_MS = 120_000; // 2 minutes
 const HEALTH_CHECK_INTERVAL_MS = 2_000;  // poll every 2s
 
+/** Retry configuration for docker-compose up */
+const SPINUP_MAX_RETRIES = 3;
+const SPINUP_RETRY_BASE_MS = 5_000; // 5s, 10s, 20s (exponential backoff)
+
+/**
+ * Per-stack health check configuration.
+ * Some stacks need extra time for DB initialization before the web process is ready.
+ */
+const STACK_HEALTH_CONFIG: Record<string, { timeoutMs: number; path: string }> = {
+  wordpress:   { timeoutMs: 180_000, path: "/wp-login.php" },
+  woocommerce: { timeoutMs: 180_000, path: "/wp-login.php" },
+  laravel:     { timeoutMs: 120_000, path: "/" },
+  symfony:     { timeoutMs: 120_000, path: "/" },
+  django:      { timeoutMs: 90_000,  path: "/" },
+  rails:       { timeoutMs: 120_000, path: "/" },
+  drupal:      { timeoutMs: 180_000, path: "/user/login" },
+  magento:     { timeoutMs: 300_000, path: "/" },
+  nextjs:      { timeoutMs: 90_000,  path: "/" },
+  nuxt:        { timeoutMs: 90_000,  path: "/" },
+  gatsby:      { timeoutMs: 60_000,  path: "/" },
+  astro:       { timeoutMs: 60_000,  path: "/" },
+  static:      { timeoutMs: 30_000,  path: "/" },
+  default:     { timeoutMs: 120_000, path: "/" },
+};
+
 // ─── Port Pool ────────────────────────────────────────────────────────────────
 
 /** In-memory set of ports currently in use by this process */
@@ -166,22 +191,46 @@ export async function spinUpSandbox(opts: SpinUpOptions): Promise<SpinUpResult> 
       // Pull failures are non-fatal — images may already be cached
     }
 
-    // Start containers
-    await execAsync(
-      `cd "${sandboxDir}" && docker-compose up -d --remove-orphans 2>&1`,
-      { timeout: 120_000 }
-    );
+    // Start containers with retry + exponential backoff
+    let lastSpinUpError: Error | null = null;
+    for (let attempt = 1; attempt <= SPINUP_MAX_RETRIES; attempt++) {
+      try {
+        await execAsync(
+          `cd "${sandboxDir}" && docker-compose up -d --remove-orphans 2>&1`,
+          { timeout: 120_000 }
+        );
+        lastSpinUpError = null;
+        break; // success
+      } catch (err) {
+        lastSpinUpError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < SPINUP_MAX_RETRIES) {
+          const waitMs = SPINUP_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+          onProgress?.(`docker-compose up failed (attempt ${attempt}/${SPINUP_MAX_RETRIES}), retrying in ${waitMs / 1000}s...`);
+          // Bring down any partial state before retry
+          try {
+            await execAsync(`cd "${sandboxDir}" && docker-compose down -v --remove-orphans 2>&1 || true`, { timeout: 30_000 });
+          } catch { /* ignore */ }
+          await sleep(waitMs);
+        }
+      }
+    }
+    if (lastSpinUpError) throw lastSpinUpError;
 
     onProgress?.(`Containers started. Waiting for health check...`);
 
-    // Wait for the primary service to be reachable
+    // Per-stack health check — different stacks need different timeouts and paths
     const primaryPort = env.ports[0]?.host ?? port;
-    const healthy = await waitForHealth(`http://localhost:${primaryPort}`, HEALTH_CHECK_TIMEOUT_MS);
+    const stackKey = tech.environmentType.toLowerCase();
+    const healthCfg = STACK_HEALTH_CONFIG[stackKey] ?? STACK_HEALTH_CONFIG.default;
+    const healthUrl = `http://localhost:${primaryPort}${healthCfg.path}`;
+
+    onProgress?.(`Health checking ${tech.environmentType} at ${healthUrl} (timeout: ${healthCfg.timeoutMs / 1000}s)...`);
+    const healthy = await waitForHealth(healthUrl, healthCfg.timeoutMs);
 
     if (!healthy) {
-      onProgress?.(`Warning: health check timed out — sandbox may still be initializing`);
+      onProgress?.(`Warning: health check timed out — sandbox may still be initializing (${tech.environmentType} can be slow to start)`);
     } else {
-      onProgress?.(`Sandbox is healthy and ready`);
+      onProgress?.(`Sandbox is healthy and ready (${tech.environmentType})`);
     }
 
     // Determine public URL

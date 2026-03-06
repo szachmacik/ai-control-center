@@ -67,33 +67,48 @@ export async function cloneSite(opts: CloneOptions): Promise<CloneResult> {
     const url = targetUrl.startsWith("http") ? targetUrl : `https://${targetUrl}`;
     const parsedUrl = new URL(url);
     const domain = parsedUrl.hostname;
+    const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
 
-    // wget mirror with sensible limits
-    const wgetCmd = [
-      "wget",
-      "--mirror",
-      "--convert-links",
-      "--adjust-extension",
-      "--page-requisites",
-      "--no-parent",
-      "--timeout=15",
-      "--tries=2",
-      "--wait=0.5",
-      "--quota=50m",           // max 50MB
-      "--level=3",             // max 3 levels deep
-      "--reject=pdf,zip,exe,dmg,pkg,iso,tar,gz,mp4,mp3,avi,mov",
-      `-P "${outputDir}"`,
-      `"${url}"`,
-    ].join(" ");
+    // Step 1: Check robots.txt to understand crawl rules
+    onProgress?.(7, "Checking robots.txt...");
+    const robotsAllowed = await fetchRobotsTxt(baseUrl);
 
+    // Step 2: Detect if site is a SPA (React/Next/Vue/Angular etc.)
+    onProgress?.(9, "Detecting site type (SPA vs traditional)...");
+    const isSPA = await detectSPA(url);
+
+    // Step 3: Try sitemap-based crawling for better coverage
     onProgress?.(10, `Cloning ${domain}...`);
+    const sitemapUrls = await fetchSitemapUrls(baseUrl);
 
-    try {
-      await execAsync(wgetCmd, { timeout: 120_000 }); // 2 min max
-    } catch {
-      // wget exits non-zero for many benign reasons (robots.txt, 404s, etc.)
-      // We continue as long as some files were downloaded
+    if (isSPA) {
+      // SPA: wget won't capture dynamic content — use a different strategy
+      // Download the shell HTML + all static assets, note SPA in metadata
+      onProgress?.(12, `Detected SPA (React/Vue/Angular) — downloading shell + assets...`);
+      await cloneSPASite(url, outputDir, domain);
+    } else if (sitemapUrls.length > 0) {
+      // Sitemap-guided crawl: download each URL from sitemap
+      onProgress?.(12, `Found sitemap with ${sitemapUrls.length} URLs — using sitemap-guided crawl...`);
+      await cloneWithSitemap(sitemapUrls, url, outputDir, domain, robotsAllowed);
+    } else {
+      // Fallback: standard wget mirror
+      onProgress?.(12, `No sitemap found — using wget mirror...`);
+      await cloneWithWget(url, outputDir);
     }
+
+    // Write metadata file
+    await fs.writeFile(
+      path.join(outputDir, ".clone-meta.json"),
+      JSON.stringify({
+        originalUrl: url,
+        domain,
+        isSPA,
+        sitemapUrlCount: sitemapUrls.length,
+        clonedAt: new Date().toISOString(),
+        robotsRespected: true,
+      }),
+      "utf-8"
+    );
 
     onProgress?.(60, "Clone complete. Counting files...");
 
@@ -136,37 +151,38 @@ const TEXT_EXTENSIONS = new Set([
   ".aspx", ".jsp", ".vue", ".svelte",
 ]);
 
-/** Replacement patterns for PII */
+/** Replacement patterns for PII — ORDER MATTERS: longer/more specific patterns first */
 const PII_PATTERNS: Array<{ pattern: RegExp; replacement: string | ((m: string) => string) }> = [
-  // Email addresses
+  // Email addresses (before anything else to avoid partial matches)
   {
     pattern: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
     replacement: "user@mock-data.test",
   },
-  // Polish phone numbers (various formats)
+  // IBAN (Polish PL + 26 digits) — longest pattern, must be first among digit patterns
   {
-    pattern: /(\+48[\s\-]?)?(\d{3}[\s\-]?\d{3}[\s\-]?\d{3}|\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2})/g,
-    replacement: "+48 000 000 000",
+    pattern: /\bPL\d{2}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}\b/gi,
+    replacement: "PL00 0000 0000 0000 0000 0000 0000",
   },
-  // Polish NIP (10 digits, often formatted)
-  {
-    pattern: /\b\d{3}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}\b/g,
-    replacement: "000-000-00-00",
-  },
-  // Polish PESEL (11 digits)
-  {
-    pattern: /\b\d{11}\b/g,
-    replacement: "00000000000",
-  },
-  // Credit card numbers (basic pattern)
+  // Credit card numbers (16 digits) — before PESEL (11) and phone (9)
   {
     pattern: /\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b/g,
     replacement: "0000-0000-0000-0000",
   },
-  // IBAN (Polish PL + 26 digits)
+  // Polish PESEL (exactly 11 digits) — MUST be before phone (9 digits) to avoid partial match
   {
-    pattern: /\bPL\d{2}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}\b/gi,
-    replacement: "PL00 0000 0000 0000 0000 0000 0000",
+    pattern: /\b\d{11}\b/g,
+    replacement: "00000000000",
+  },
+  // Polish NIP (10 digits, often formatted) — after PESEL
+  {
+    pattern: /\b\d{3}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}\b/g,
+    replacement: "000-000-00-00",
+  },
+  // Polish phone numbers (various formats) — last, shortest digit pattern
+  // Uses negative lookbehind/lookahead to avoid matching digits inside longer sequences
+  {
+    pattern: /(?<!\d)(\+48[\s\-]?)?(\d{3}[\s\-]?\d{3}[\s\-]?\d{3}|\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2})(?!\d)/g,
+    replacement: "+48 000 000 000",
   },
 ];
 
@@ -270,4 +286,212 @@ export async function deleteSandboxFiles(sandboxId: number): Promise<void> {
   const sandboxDir = path.join(SANDBOX_DIR, `sandbox-${sandboxId}`);
   const zipPath = path.join(SANDBOX_DIR, `sandbox-${sandboxId}.zip`);
   await execAsync(`rm -rf "${sandboxDir}" "${zipPath}"`).catch(() => {});
+}
+
+// ─── Crawl Helpers ────────────────────────────────────────────────────────────
+
+/** Fetch and parse robots.txt — returns list of disallowed paths */
+async function fetchRobotsTxt(baseUrl: string): Promise<Set<string>> {
+  const disallowed = new Set<string>();
+  try {
+    const { stdout } = await execAsync(
+      `curl -s --max-time 5 "${baseUrl}/robots.txt" 2>/dev/null || echo ""`,
+      { timeout: 8000 }
+    );
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.toLowerCase().startsWith("disallow:")) {
+        const p = trimmed.substring(9).trim();
+        if (p && p !== "/") disallowed.add(p);
+      }
+    }
+  } catch { /* ignore */ }
+  return disallowed;
+}
+
+/** Detect if a site is a Single Page Application (React, Vue, Angular, Next.js etc.) */
+async function detectSPA(url: string): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync(
+      `curl -s --max-time 10 -L "${url}" 2>/dev/null | head -c 20000`,
+      { timeout: 15000 }
+    );
+    const html = stdout.toLowerCase();
+
+    // Strong SPA indicators
+    const spaSignals = [
+      // React
+      html.includes("__react") || html.includes("data-reactroot") || html.includes("data-reactid"),
+      // Vue
+      html.includes("__vue") || html.includes("data-v-") || html.includes("vue.min.js"),
+      // Angular
+      html.includes("ng-version") || html.includes("ng-app") || html.includes("angular.min.js"),
+      // Next.js
+      html.includes("__next") || html.includes("_next/static") || html.includes("__next_data"),
+      // Nuxt
+      html.includes("__nuxt") || html.includes("_nuxt/"),
+      // Gatsby
+      html.includes("gatsby") && html.includes("page-data"),
+      // Generic SPA: very little content in initial HTML (JS-rendered)
+      (html.match(/<p[^>]*>/g) ?? []).length < 3 && html.includes("</script>"),
+    ];
+
+    return spaSignals.filter(Boolean).length >= 1;
+  } catch {
+    return false;
+  }
+}
+
+/** Fetch URLs from sitemap.xml (and sitemap index) */
+async function fetchSitemapUrls(baseUrl: string): Promise<string[]> {
+  const urls: string[] = [];
+  const sitemapCandidates = [
+    `${baseUrl}/sitemap.xml`,
+    `${baseUrl}/sitemap_index.xml`,
+    `${baseUrl}/sitemap.xml.gz`,
+    `${baseUrl}/wp-sitemap.xml`,
+  ];
+
+  for (const sitemapUrl of sitemapCandidates) {
+    try {
+      const { stdout } = await execAsync(
+        `curl -s --max-time 10 "${sitemapUrl}" 2>/dev/null | head -c 500000`,
+        { timeout: 12000 }
+      );
+      if (!stdout.includes("<url") && !stdout.includes("<sitemap")) continue;
+
+      // Parse <loc> tags
+      const locMatches = stdout.match(/<loc>(.*?)<\/loc>/gi) ?? [];
+      for (const match of locMatches) {
+        const u = match.replace(/<\/?loc>/gi, "").trim();
+        if (u.startsWith("http") && !u.endsWith(".xml")) {
+          urls.push(u);
+        }
+      }
+      if (urls.length > 0) break; // found a working sitemap
+    } catch { /* try next */ }
+  }
+
+  // Cap at 200 URLs to avoid excessive crawling
+  return urls.slice(0, 200);
+}
+
+/** Standard wget mirror clone */
+async function cloneWithWget(url: string, outputDir: string): Promise<void> {
+  const wgetCmd = [
+    "wget",
+    "--mirror",
+    "--convert-links",
+    "--adjust-extension",
+    "--page-requisites",
+    "--no-parent",
+    "--timeout=15",
+    "--tries=2",
+    "--wait=0.5",
+    "--quota=50m",
+    "--level=3",
+    "--reject=pdf,zip,exe,dmg,pkg,iso,tar,gz,mp4,mp3,avi,mov",
+    `--user-agent="Mozilla/5.0 (compatible; SentinelSecurityBot/1.0)"`,
+    `-P "${outputDir}"`,
+    `"${url}"`,
+  ].join(" ");
+
+  try {
+    await execAsync(wgetCmd, { timeout: 120_000 });
+  } catch { /* wget exits non-zero for benign reasons */ }
+}
+
+/** Sitemap-guided clone: wget each URL from sitemap */
+async function cloneWithSitemap(
+  sitemapUrls: string[],
+  baseUrl: string,
+  outputDir: string,
+  domain: string,
+  disallowed: Set<string>
+): Promise<void> {
+  // Filter out disallowed paths
+  const allowed = sitemapUrls.filter(u => {
+    try {
+      const p = new URL(u).pathname;
+      for (const d of Array.from(disallowed)) {
+        if (p.startsWith(d)) return false;
+      }
+      return true;
+    } catch { return false; }
+  });
+
+  // Write URL list to temp file for wget --input-file
+  const urlListFile = path.join(outputDir, ".sitemap-urls.txt");
+  await fs.writeFile(urlListFile, allowed.join("\n"), "utf-8");
+
+  const wgetCmd = [
+    "wget",
+    "--convert-links",
+    "--adjust-extension",
+    "--page-requisites",
+    "--no-parent",
+    "--timeout=15",
+    "--tries=2",
+    "--wait=0.3",
+    "--quota=50m",
+    `--domains="${domain}"`,
+    `--user-agent="Mozilla/5.0 (compatible; SentinelSecurityBot/1.0)"`,
+    `--input-file="${urlListFile}"`,
+    `-P "${outputDir}"`,
+  ].join(" ");
+
+  try {
+    await execAsync(wgetCmd, { timeout: 180_000 });
+  } catch { /* non-fatal */ }
+
+  // Also grab the homepage and its assets
+  try {
+    await execAsync(
+      `wget --page-requisites --convert-links --adjust-extension --no-parent --timeout=15 --tries=2 -P "${outputDir}" "${baseUrl}" 2>/dev/null || true`,
+      { timeout: 30_000 }
+    );
+  } catch { /* non-fatal */ }
+
+  // Cleanup temp file
+  try { await fs.unlink(urlListFile); } catch { /* ignore */ }
+}
+
+/** SPA clone: download shell HTML + all referenced static assets */
+async function cloneSPASite(url: string, outputDir: string, domain: string): Promise<void> {
+  // For SPAs, wget mirror is mostly useless (no server-side rendered pages)
+  // Strategy: download the index.html + all JS/CSS bundles + images
+  const wgetCmd = [
+    "wget",
+    "--page-requisites",
+    "--convert-links",
+    "--adjust-extension",
+    "--no-parent",
+    "--timeout=15",
+    "--tries=2",
+    "--quota=50m",
+    "--level=2",
+    `--domains="${domain}"`,
+    `--user-agent="Mozilla/5.0 (compatible; SentinelSecurityBot/1.0)"`,
+    `-P "${outputDir}"`,
+    `"${url}"`,
+  ].join(" ");
+
+  try {
+    await execAsync(wgetCmd, { timeout: 90_000 });
+  } catch { /* non-fatal */ }
+
+  // Write a note about SPA limitations
+  await fs.writeFile(
+    path.join(outputDir, "SPA_NOTE.txt"),
+    `This site was detected as a Single Page Application (React/Vue/Angular/Next.js).
+Static assets and the app shell have been downloaded.
+Dynamic content (loaded via JavaScript at runtime) is not captured in this clone.
+Security scanning will focus on:
+  - Static asset analysis (JS bundle secrets, dependencies)
+  - HTTP headers and TLS configuration
+  - API endpoint discovery from JS bundles
+  - CORS and CSP policy analysis
+`,
+    "utf-8"
+  );
 }

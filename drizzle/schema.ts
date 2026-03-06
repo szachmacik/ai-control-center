@@ -351,3 +351,61 @@ export const metaEvents = mysqlTable("meta_events", {
 });
 export type MetaEvent = typeof metaEvents.$inferSelect;
 export type InsertMetaEvent = typeof metaEvents.$inferInsert;
+
+// ─── ManyChat Events ──────────────────────────────────────────────────────────
+// Stores incoming ManyChat webhook events for analytics and CAPI forwarding
+export const manychatEvents = mysqlTable("manychat_events", {
+  id: int("id").autoincrement().primaryKey(),
+  pixelId: int("pixel_id"),                                                     // null if no pixel linked yet
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  category: varchar("category", { length: 32 }).notNull().default("other"),
+  isLead: int("is_lead").default(0).notNull(),
+  isConversion: int("is_conversion").default(0).notNull(),
+  subscriberId: varchar("subscriber_id", { length: 128 }),
+  subscriberEmail: varchar("subscriber_email", { length: 255 }),
+  subscriberPhone: varchar("subscriber_phone", { length: 32 }),
+  subscriberName: varchar("subscriber_name", { length: 128 }),
+  channel: varchar("channel", { length: 32 }),
+  flowId: varchar("flow_id", { length: 128 }),
+  flowName: varchar("flow_name", { length: 255 }),
+  tag: varchar("tag", { length: 128 }),
+  rawPayload: text("raw_payload"),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+});
+export type ManyChatEvent = typeof manychatEvents.$inferSelect;
+export type InsertManyChatEvent = typeof manychatEvents.$inferInsert;
+
+// ─── Web Push Subscriptions ───────────────────────────────────────────────────
+// Stores browser push notification subscriptions (VAPID-based)
+export const webPushSubscriptions = mysqlTable("web_push_subscriptions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  userAgent: varchar("user_agent", { length: 512 }),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+});
+export type WebPushSubscription = typeof webPushSubscriptions.$inferSelect;
+export type InsertWebPushSubscription = typeof webPushSubscriptions.$inferInsert;
+
+// ─── Sandbox User Preferences ─────────────────────────────────────────────────
+// Per-user preferences for Security Sandbox module
+export const sandboxUserPrefs = mysqlTable("sandbox_user_prefs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull().unique(),
+  defaultScanType: mysqlEnum("default_scan_type", ["passive", "active", "headers", "ssl", "full"]).default("passive").notNull(),
+  defaultTtlMinutes: int("default_ttl_minutes").default(60).notNull(),
+  defaultMode: mysqlEnum("default_mode", ["cloud", "download"]).default("download").notNull(),
+  maxSandboxes: int("max_sandboxes").default(5).notNull(),
+  notifyOnScanComplete: boolean("notify_on_scan_complete").default(true).notNull(),
+  notifyOnCritical: boolean("notify_on_critical").default(true).notNull(),
+  notifyOnExpiry: boolean("notify_on_expiry").default(true).notNull(),
+  autoDeleteAfterScan: boolean("auto_delete_after_scan").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type SandboxUserPrefs = typeof sandboxUserPrefs.$inferSelect;
+export type InsertSandboxUserPrefs = typeof sandboxUserPrefs.$inferInsert;
