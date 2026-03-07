@@ -65,12 +65,12 @@
 - [ ] Integracja z GitHub Actions (uruchom skan na PR)
 
 ## Fixes & Enhancements (Mar 3)
-- [ ] Fix Settings 404 - create Settings page and add route
+- [x] Fix Settings 404 - create Settings page and add route
 - [ ] Seed infrastructure table with real services (Ollama, Kortix/Suna, OpenCraw, Open WebUI, Sentinel, Polaris)
-- [ ] Add real-time health check for infrastructure services
+- [x] Add real-time health check for infrastructure services
 - [ ] Fix DATABASE_URL pointing to wrong container (done)
 - [x] Fix post-deployment command (pnpm db:push → node dist/migrate.js)
-- [ ] Add seed endpoint (admin-only tRPC mutation) to populate infrastructure table
+- [x] Add seed endpoint (admin-only tRPC mutation) to populate infrastructure table
 - [ ] Add SSO/launch panel in Infrastructure page - open services without re-login
 - [ ] Generate signed launch tokens for services that require auth (Sentinel, Polaris)
 - [ ] Add "Launch" button on each infrastructure card that opens service in new tab with auto-auth token
@@ -79,13 +79,13 @@
 - [ ] Update autonomous-deployment-knowledge-base.md with autodeploy lessons
 
 ## Multi-Agent Orchestration Hub (Phase 2)
-- [ ] DB schema: extend agents table with google_drive_folder, mcp_endpoint, last_seen fields
-- [ ] DB schema: tasks table (title, description, assigned_agent_id, status, priority, result_drive_url, due_date)
-- [ ] DB schema: task_logs table (task_id, message, timestamp, author_agent)
-- [ ] tRPC: tasks CRUD (list, create, assign, update status, add log, get by agent)
+- [x] DB schema: extend agents table with google_drive_folder, mcp_endpoint, last_seen fields
+- [x] DB schema: tasks table (title, description, assigned_agent_id, status, priority, result_drive_url, due_date)
+- [x] DB schema: task_logs table (task_id, message, timestamp, author_agent)
+- [x] tRPC: tasks CRUD (list, create, assign, update status, add log, get by agent)
 - [ ] tRPC: Google Drive integration (list files in task folder, get shareable link)
 - [ ] tRPC: agent heartbeat endpoint (agents report online status via HTTP POST)
-- [ ] Frontend: /tasks page - kanban board (todo/in-progress/review/done)
+- [x] Frontend: /tasks page - kanban board (todo/in-progress/review/done)
 - [ ] Frontend: /tasks/:id page - szczegóły, logi, wyniki z Drive, timeline
 - [ ] Frontend: task creation modal (tytuł, opis, agent, priorytet, deadline)
 - [ ] Frontend: /agents page - rozbuduj o MCP endpoint, Drive folder, last seen
@@ -106,7 +106,7 @@
 ## AI Providers Integration (Claude, Gemini, OpenAI)
 - [ ] Check Google Drive / previous session notes for original AI providers design
 - [ ] Add AI providers section to Secrets vault (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY)
-- [ ] Add agents seed: Claude (Anthropic), Gemini (Google), GPT-4 (OpenAI) as built-in agents
+- [x] Add agents seed: Claude (Anthropic), Gemini (Google), GPT-4 (OpenAI) as built-in agents
 - [ ] Frontend: /agents page - show AI provider agents with model info, API key status (set/not set)
 - [ ] Frontend: AI provider card - test connection button (calls API to verify key works)
 - [ ] tRPC: testProviderConnection mutation (calls provider API with stored key, returns latency/model list)

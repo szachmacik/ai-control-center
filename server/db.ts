@@ -139,10 +139,13 @@ export async function seedAgents() {
   if (existing.length > 0) return 0;
 
   const items = [
-    { name: "Manus Deployer", role: "autonomous-deployer", description: "Deploys and monitors applications on Coolify via API", model: "claude-3-5-sonnet", status: "active" as const },
-    { name: "Sentinel Monitor", role: "monitor", description: "Monitors infrastructure health and security events", model: "gpt-4o-mini", status: "active" as const },
-    { name: "Migration Bot", role: "db-admin", description: "Runs database migrations and schema updates", model: "gpt-4o-mini", status: "idle" as const },
-    { name: "Code Reviewer", role: "code-review", description: "Reviews PRs and suggests improvements", model: "claude-3-5-sonnet", status: "idle" as const },
+    { name: "Manus Deployer", role: "autonomous-deployer", description: "Deploys and monitors applications on Coolify via API", model: "claude-3-5-sonnet", status: "active" as const, agentType: "manus" as const },
+    { name: "Sentinel Monitor", role: "monitor", description: "Monitors infrastructure health and security events", model: "gpt-4o-mini", status: "active" as const, agentType: "manus" as const },
+    { name: "Migration Bot", role: "db-admin", description: "Runs database migrations and schema updates", model: "gpt-4o-mini", status: "idle" as const, agentType: "manus" as const },
+    { name: "Code Reviewer", role: "code-review", description: "Reviews PRs and suggests improvements", model: "claude-3-5-sonnet", status: "idle" as const, agentType: "manus" as const },
+    { name: "Claude (Anthropic)", role: "assistant", description: "Claude 3.5 Sonnet — general-purpose AI assistant by Anthropic", model: "claude-3-5-sonnet", status: "idle" as const, agentType: "custom" as const },
+    { name: "Gemini (Google)", role: "assistant", description: "Gemini 2.0 Flash — multimodal AI assistant by Google DeepMind", model: "gemini-2.0-flash", status: "idle" as const, agentType: "custom" as const },
+    { name: "GPT-4 (OpenAI)", role: "assistant", description: "GPT-4o — advanced reasoning AI assistant by OpenAI", model: "gpt-4o", status: "idle" as const, agentType: "custom" as const },
   ];
 
   for (const item of items) {

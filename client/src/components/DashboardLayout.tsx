@@ -38,6 +38,7 @@ import {
   Megaphone,
   FlaskConical,
   BarChart3,
+  Brain,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -58,6 +59,7 @@ const menuItems = [
   { icon: Megaphone, label: "Marketing", path: "/marketing" },
   { icon: FlaskConical, label: "Security Sandbox", path: "/sandbox" },
   { icon: BarChart3, label: "Meta Ads CAPI", path: "/meta-ads" },
+  { icon: Brain, label: "Knowledge Base", path: "/knowledge" },
   { icon: FolderPlus, label: "New Project", path: "/projects/new" },
 ];
 
