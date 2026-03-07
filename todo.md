@@ -27,7 +27,7 @@
 
 ## Backend
 - [x] tRPC routers for all features (agents, tasks, infra, secrets, logs, projects, dashboard)
-- [x] Vitest tests (276 tests passing — 100% pass rate)
+- [x] Vitest tests (343 tests passing — 100% pass rate, 14 test files)
 
 ## Deployment
 - [ ] GitHub repo creation
@@ -53,13 +53,16 @@
 - [x] **NOWE: bulkDelete** (checkbox selection + toolbar, max 20 sandboxów naraz)
 - [x] **NOWE: lifecycle.test.ts** (85 testów: port allocation, TTL, teardown, concurrent)
 - [x] **NOWE: nvdLookup.test.ts** (49 testów: cache, rate limiter, CSV escape, severity mapping)
+- [x] **NOWE: exportSarif endpoint** (SARIF 2.1.0, rules dedup, CVSS scores, GitHub Code Scanning)
+- [x] **NOWE: Trend Chart UI** (recharts LineChart — risk/severity trend w SandboxDetail)
+- [x] **NOWE: Schedule Panel UI** (daily/weekly/monthly auto-scans w SandboxDetail)
+- [x] **NOWE: SARIF export button** (blob download .sarif w SandboxDetail)
+- [x] **NOWE: Compare Scans button** (link do SandboxCompare z SandboxDetail)
+- [x] **NOWE: sarifExport.test.ts** (41 testów: sevToLevel, sevToScore, ruleId, filename, SARIF structure)
+- [x] **NOWE: scheduleWorker.test.ts** (26 testów: scheduleToMs, nextRunAt, isDue, worker lifecycle)
 
 ## Sentinel — TODO
-- [ ] Scan scheduling (cron — uruchamiaj skan co tydzień automatycznie)
 - [ ] Slack/email notification po zakończeniu skanu
-- [ ] Diff scans — porównaj dwa skany i pokaż nowe/usunięte findings
-- [ ] Severity trend chart (Chart.js — linia czasu severity w SandboxDetail)
-- [ ] SARIF export (GitHub Code Scanning format)
 - [ ] API key auth dla zewnętrznych klientów (Sentinel jako SaaS)
 - [ ] Webhook na zakończenie skanu (POST do URL użytkownika)
 - [ ] Integracja z GitHub Actions (uruchom skan na PR)
