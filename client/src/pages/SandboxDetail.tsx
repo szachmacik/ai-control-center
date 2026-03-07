@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { useLocation, useParams } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,11 @@ import {
   FileDown,
   Gauge,
   Trash2,
+  TrendingUp,
+  Calendar,
+  GitCompare,
+  BellRing,
+  BellOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -203,6 +209,9 @@ export default function SandboxDetail() {
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [showTrend, setShowTrend] = useState(false);
+  const [scheduleType, setScheduleType] = useState<"daily" | "weekly" | "monthly">("weekly");
+  const [scheduleScanType, setScheduleScanType] = useState("passive");
 
   const { data: sandbox, isLoading, refetch } = trpc.sandbox.get.useQuery(
     { id: sandboxId },
@@ -292,6 +301,56 @@ export default function SandboxDetail() {
     },
     onError: (err) => toast.error(err.message),
   });
+
+  // ─── Trend chart ────────────────────────────────────────────────────────────
+  const { data: trendData } = trpc.sandbox.getScanTrend.useQuery(
+    { sandboxId, limit: 10 },
+    { enabled: !!sandboxId && showTrend }
+  );
+
+  // ─── Schedule ───────────────────────────────────────────────────────────────
+  const { data: scheduleData, refetch: refetchSchedule } = trpc.sandbox.getSchedule.useQuery(
+    { sandboxId },
+    { enabled: !!sandboxId }
+  );
+  const createScheduleMutation = trpc.sandbox.createSchedule.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Schedule created — next run: ${new Date(data.nextRunAt).toLocaleString("pl-PL")}`);
+      refetchSchedule();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const deleteScheduleMutation = trpc.sandbox.deleteSchedule.useMutation({
+    onSuccess: () => { toast.success("Schedule removed"); refetchSchedule(); },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // ─── SARIF export ────────────────────────────────────────────────────────────
+  const { refetch: refetchSarif } = trpc.sandbox.exportSarif.useQuery(
+    { sandboxId },
+    { enabled: false }
+  );
+  const handleExportSarif = async () => {
+    try {
+      const result = await refetchSarif();
+      if (result.data && result.data.sarif) {
+        const blob = new Blob([result.data.sarif], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = result.data.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast.success(`SARIF exported: ${result.data.findingCount} findings`);
+      } else {
+        toast.info("No completed scan to export");
+      }
+    } catch {
+      toast.error("Failed to export SARIF");
+    }
+  };
 
   if (isLoading) {
     return (
@@ -673,6 +732,161 @@ export default function SandboxDetail() {
               </p>
             </div>
           ) : null}
+        </div>
+      )}
+
+      {/* ─── Trend Chart ────────────────────────────────────────────────────────────────────────── */}
+      {(sandbox as any).scans?.filter((s: any) => s.status === "completed").length >= 2 && (
+        <Card className="border-border bg-card">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+                <TrendingUp className="h-3.5 w-3.5" />
+                Security Trend
+              </CardTitle>
+              <button
+                onClick={() => setShowTrend((v) => !v)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showTrend ? "Hide" : "Show chart"}
+              </button>
+            </div>
+          </CardHeader>
+          {showTrend && (
+            <CardContent>
+              {trendData && Array.isArray(trendData) && trendData.length >= 2 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={(trendData as any[]).map((p: any) => ({
+                    date: new Date(p.createdAt ?? p.date ?? Date.now()).toLocaleDateString("pl-PL", { day: "2-digit", month: "short" }),
+                    risk: p.riskScore ?? 0,
+                    critical: p.summary?.critical ?? 0,
+                    high: p.summary?.high ?? 0,
+                    medium: p.summary?.medium ?? 0,
+                  })).reverse()}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                    <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                    <Tooltip
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="risk" stroke="#ef4444" strokeWidth={2} dot={false} name="Risk Score" />
+                    <Line type="monotone" dataKey="critical" stroke="#dc2626" strokeWidth={1.5} dot={false} name="Critical" />
+                    <Line type="monotone" dataKey="high" stroke="#f97316" strokeWidth={1.5} dot={false} name="High" />
+                    <Line type="monotone" dataKey="medium" stroke="#eab308" strokeWidth={1.5} dot={false} name="Medium" />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center py-4">Loading trend data...</p>
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* ─── Schedule Panel ────────────────────────────────────────────────────────────────────────── */}
+      {!isActive && (
+        <Card className="border-border bg-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+              <Calendar className="h-3.5 w-3.5" />
+              Scheduled Scans
+              {scheduleData && (
+                <Badge variant="outline" className="text-xs border-emerald-500/30 text-emerald-400 ml-auto">
+                  Active
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {scheduleData ? (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5">
+                <div className="space-y-0.5">
+                  <p className="text-sm text-foreground capitalize">
+                    {(scheduleData as any).schedule} • {(scheduleData as any).scanType} scan
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Next run: {new Date((scheduleData as any).nextRunAt).toLocaleString("pl-PL")}
+                    {" "}• Runs: {(scheduleData as any).runCount ?? 0}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  onClick={() => deleteScheduleMutation.mutate({ sandboxId })}
+                  disabled={deleteScheduleMutation.isPending}
+                >
+                  <BellOff className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <Select value={scheduleType} onValueChange={(v) => setScheduleType(v as any)}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={scheduleScanType} onValueChange={setScheduleScanType}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SCAN_TYPES.map((st) => (
+                      <SelectItem key={st.value} value={st.value}>{st.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 shrink-0"
+                  onClick={() => createScheduleMutation.mutate({ sandboxId, schedule: scheduleType, scanType: scheduleScanType as any })}
+                  disabled={createScheduleMutation.isPending}
+                >
+                  {createScheduleMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BellRing className="h-3.5 w-3.5" />}
+                  Schedule
+                </Button>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <Info className="h-3 w-3" />
+              Scheduled scans run automatically in the background.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─── Export & Compare actions ───────────────────────────────────────────────────────────────────── */}
+      {(sandbox as any).scans?.filter((s: any) => s.status === "completed").length >= 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={handleExportSarif}
+          >
+            <FileDown className="h-3.5 w-3.5" />
+            Export SARIF
+          </Button>
+          {(sandbox as any).scans?.filter((s: any) => s.status === "completed").length >= 2 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setLocation("/sandbox-compare")}
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              Compare Scans
+            </Button>
+          )}
         </div>
       )}
 

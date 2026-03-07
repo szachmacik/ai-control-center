@@ -858,6 +858,144 @@ export const sandboxRouter = router({
 
       return buildTrendSeries(snapshots);
     }),
+
+  // ─── SARIF Export ──────────────────────────────────────────────────────────────────────────
+  exportSarif: protectedProcedure
+    .input(z.object({
+      sandboxId: z.number(),
+      scanId: z.number().optional(),
+    }))
+    .query(async ({ input, ctx }) => {
+      const { db, sandbox } = await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+
+      // Resolve scanId — use latest completed scan if not specified
+      let scanId = input.scanId;
+      if (!scanId) {
+        const [latest] = await db
+          .select({ id: sandboxScans.id })
+          .from(sandboxScans)
+          .where(and(eq(sandboxScans.sandboxId, input.sandboxId), eq(sandboxScans.status, "completed")))
+          .orderBy(desc(sandboxScans.createdAt))
+          .limit(1);
+        if (!latest) throw new TRPCError({ code: "NOT_FOUND", message: "No completed scan found" });
+        scanId = latest.id;
+      }
+
+      const [scan] = await db
+        .select()
+        .from(sandboxScans)
+        .where(and(eq(sandboxScans.id, scanId), eq(sandboxScans.sandboxId, input.sandboxId)))
+        .limit(1);
+      if (!scan) throw new TRPCError({ code: "NOT_FOUND", message: "Scan not found" });
+
+      const findings = await db
+        .select()
+        .from(sandboxFindings)
+        .where(eq(sandboxFindings.scanId, scanId));
+
+      // Map severity to SARIF level
+      const sevToLevel = (sev: string): string => {
+        if (sev === "critical" || sev === "high") return "error";
+        if (sev === "medium") return "warning";
+        return "note";
+      };
+
+      // Map severity to CVSS-like score for GitHub Security tab
+      const sevToScore = (sev: string): number => {
+        if (sev === "critical") return 9.5;
+        if (sev === "high") return 7.5;
+        if (sev === "medium") return 5.0;
+        if (sev === "low") return 2.5;
+        return 0.0;
+      };
+
+      // Build unique rules from findings
+      const rulesMap = new Map<string, {
+        id: string; name: string; shortDescription: string;
+        helpText: string; severity: string; tags: string[];
+      }>();
+
+      for (const f of findings) {
+        const ruleId = `SENTINEL-${f.category.toUpperCase().replace(/[^A-Z0-9]/g, "-")}`;
+        if (!rulesMap.has(ruleId)) {
+          rulesMap.set(ruleId, {
+            id: ruleId,
+            name: f.category,
+            shortDescription: f.title,
+            helpText: f.remediation ?? "Review and remediate this vulnerability.",
+            severity: f.severity,
+            tags: ["security", f.category.toLowerCase().replace(/\s+/g, "-")],
+          });
+        }
+      }
+
+      const rules = Array.from(rulesMap.values()).map((r) => ({
+        id: r.id,
+        name: r.name,
+        shortDescription: { text: r.shortDescription },
+        fullDescription: { text: r.helpText },
+        helpUri: "https://owasp.org/www-project-top-ten/",
+        properties: {
+          tags: r.tags,
+          "security-severity": String(sevToScore(r.severity)),
+          precision: "medium",
+          "problem.severity": sevToLevel(r.severity),
+        },
+      }));
+
+      const results = findings.map((f) => {
+        const ruleId = `SENTINEL-${f.category.toUpperCase().replace(/[^A-Z0-9]/g, "-")}`;
+        const uri = f.affectedUrl ?? sandbox.targetUrl ?? "unknown";
+        return {
+          ruleId,
+          level: sevToLevel(f.severity),
+          message: { text: f.description ?? f.title },
+          locations: [{
+            physicalLocation: {
+              artifactLocation: { uri, uriBaseId: "%SRCROOT%" },
+              region: { startLine: 1 },
+            },
+          }],
+          properties: {
+            severity: f.severity,
+            category: f.category,
+            ...(f.cvssScore ? { cvssScore: f.cvssScore } : {}),
+            ...(f.evidence ? { evidence: f.evidence } : {}),
+            ...(f.remediation ? { remediation: f.remediation } : {}),
+          },
+        };
+      });
+
+      const sarif = {
+        version: "2.1.0",
+        $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+        runs: [{
+          tool: {
+            driver: {
+              name: "Sentinel Security Scanner",
+              version: "1.0.0",
+              informationUri: "https://sentinel.ofshore.dev",
+              rules,
+            },
+          },
+          results,
+          artifacts: [{
+            location: { uri: sandbox.targetUrl ?? "unknown" },
+            description: { text: `Security scan of ${sandbox.name}` },
+          }],
+          invocations: [{
+            executionSuccessful: true,
+            endTimeUtc: scan.completedAt?.toISOString() ?? new Date().toISOString(),
+            toolExecutionNotifications: [],
+          }],
+        }],
+      };
+
+      const safeName = sandbox.name.replace(/[^a-zA-Z0-9-_]/g, "-");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const filename = `sentinel-${safeName}-scan${scanId}-${dateStr}.sarif`;
+      return { sarif: JSON.stringify(sarif, null, 2), filename, findingCount: findings.length };
+    }),
 });
 
 // ─── Shared scan runner (used by create + startScan) ─────────────────────────
