@@ -50,6 +50,13 @@
       "when": 1741326000000,
       "tag": "0006_manychat_webpush_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1741412000000,
+      "tag": "0007_webhooks_apikeys_knowledge",
+      "breakpoints": true
     }
   ]
 }

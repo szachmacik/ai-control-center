@@ -46,8 +46,16 @@ import {
   GitCompare,
   BellRing,
   BellOff,
+  Webhook,
+  Key,
+  Plus,
+  Copy,
+  Eye,
+  EyeOff,
+  CheckSquare,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
 
 // ─── Severity config ──────────────────────────────────────────────────────────
 
@@ -325,7 +333,52 @@ export default function SandboxDetail() {
     onError: (err) => toast.error(err.message),
   });
 
-  // ─── SARIF export ────────────────────────────────────────────────────────────
+  // ─── Webhooks ──────────────────────────────────────────────────────────────────────────
+  const [showWebhooks, setShowWebhooks] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(["scan.completed"]);
+  const { data: webhooks = [], refetch: refetchWebhooks } = trpc.sandbox.listWebhooks.useQuery(
+    { sandboxId },
+    { enabled: !!sandboxId && showWebhooks }
+  );
+  const createWebhookMutation = trpc.sandbox.createWebhook.useMutation({
+    onSuccess: () => { toast.success("Webhook created"); setWebhookUrl(""); setWebhookSecret(""); refetchWebhooks(); },
+    onError: (err) => toast.error(err.message),
+  });
+  const deleteWebhookMutation = trpc.sandbox.deleteWebhook.useMutation({
+    onSuccess: () => { toast.success("Webhook deleted"); refetchWebhooks(); },
+    onError: (err) => toast.error(err.message),
+  });
+  const testWebhookMutation = trpc.sandbox.testWebhook.useMutation({
+    onSuccess: (r) => toast[r.success ? "success" : "error"](r.success ? `Test delivered (${r.statusCode})` : `Test failed (${r.statusCode})`),
+    onError: (err) => toast.error(err.message),
+  });
+
+  // ─── API Keys ──────────────────────────────────────────────────────────────────────────
+  const [showApiKeys, setShowApiKeys] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyScopes, setNewKeyScopes] = useState<string[]>(["sandbox:read"]);
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const { data: apiKeys = [], refetch: refetchApiKeys } = trpc.sandbox.listApiKeys.useQuery(
+    undefined,
+    { enabled: showApiKeys }
+  );
+  const createApiKeyMutation = trpc.sandbox.createApiKey.useMutation({
+    onSuccess: (data) => {
+      toast.success(`API key created: ${data.prefix}...`);
+      setRevealedKey(data.key);
+      setNewKeyName("");
+      refetchApiKeys();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const revokeApiKeyMutation = trpc.sandbox.revokeApiKey.useMutation({
+    onSuccess: () => { toast.success("API key revoked"); refetchApiKeys(); },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // ─── SARIF export ───────────────────────────────────────────────────────────────────
   const { refetch: refetchSarif } = trpc.sandbox.exportSarif.useQuery(
     { sandboxId },
     { enabled: false }
@@ -943,6 +996,176 @@ export default function SandboxDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* ─── Webhook Panel ─────────────────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Webhook className="h-4 w-4 text-muted-foreground" />
+              Webhooks
+              <span className="text-xs text-muted-foreground font-normal">(POST on scan events)</span>
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => { setShowWebhooks((v) => !v); }}>
+              {showWebhooks ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+          </div>
+        </CardHeader>
+        {showWebhooks && (
+          <CardContent className="space-y-4">
+            {/* Webhook list */}
+            {webhooks.length > 0 && (
+              <div className="space-y-2">
+                {webhooks.map((wh: any) => (
+                  <div key={wh.id} className="flex items-center gap-2 p-3 rounded-lg border border-border bg-muted/20">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{wh.url}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Events: {(Array.isArray(wh.events) ? wh.events : []).join(", ")}
+                        {wh.lastStatusCode && <span className="ml-2">Last: {wh.lastStatusCode}</span>}
+                        {(wh.failureCount ?? 0) > 0 && <span className="ml-2 text-destructive">{wh.failureCount} failures</span>}
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => testWebhookMutation.mutate({ webhookId: wh.id })} disabled={testWebhookMutation.isPending}>
+                      Test
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => deleteWebhookMutation.mutate({ webhookId: wh.id })}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Add webhook form */}
+            <div className="space-y-2 border border-border rounded-lg p-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Add Webhook</p>
+              <Input
+                placeholder="https://your-server.com/webhook"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                className="text-sm"
+              />
+              <Input
+                placeholder="Signing secret (optional)"
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                className="text-sm"
+              />
+              <div className="flex flex-wrap gap-2">
+                {["scan.completed", "scan.failed", "critical.found"].map((ev) => (
+                  <label key={ev} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={webhookEvents.includes(ev)}
+                      onChange={(e) => setWebhookEvents(e.target.checked ? [...webhookEvents, ev] : webhookEvents.filter((x) => x !== ev))}
+                      className="rounded"
+                    />
+                    {ev}
+                  </label>
+                ))}
+              </div>
+              <Button
+                size="sm"
+                disabled={!webhookUrl || createWebhookMutation.isPending}
+                onClick={() => createWebhookMutation.mutate({ sandboxId, url: webhookUrl, secret: webhookSecret || undefined, events: webhookEvents as any })}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Webhook
+              </Button>
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ─── API Keys Panel ────────────────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Key className="h-4 w-4 text-muted-foreground" />
+              API Keys
+              <span className="text-xs text-muted-foreground font-normal">(Sentinel SaaS access)</span>
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => setShowApiKeys((v) => !v)}>
+              {showApiKeys ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+          </div>
+        </CardHeader>
+        {showApiKeys && (
+          <CardContent className="space-y-4">
+            {/* Revealed key banner */}
+            {revealedKey && (
+              <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+                <p className="text-xs font-medium text-emerald-400 mb-1.5">Copy your API key now — it will not be shown again</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono bg-muted/30 rounded px-2 py-1 truncate">{revealedKey}</code>
+                  <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(revealedKey); toast.success("Copied!"); }}>
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setRevealedKey(null)}>
+                    <EyeOff className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            {/* Key list */}
+            {apiKeys.length > 0 && (
+              <div className="space-y-2">
+                {apiKeys.map((k: any) => (
+                  <div key={k.id} className="flex items-center gap-2 p-3 rounded-lg border border-border bg-muted/20">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{k.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <code>{k.keyPrefix}...</code>
+                        {" · "}{(Array.isArray(k.scopes) ? k.scopes : []).join(", ")}
+                        {k.lastUsedAt && <span className="ml-2">Last used: {new Date(k.lastUsedAt).toLocaleDateString()}</span>}
+                        {k.expiresAt && <span className="ml-2">Expires: {new Date(k.expiresAt).toLocaleDateString()}</span>}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={k.isActive ? "border-emerald-500/30 text-emerald-400" : "border-border text-muted-foreground"}>
+                      {k.isActive ? "Active" : "Revoked"}
+                    </Badge>
+                    {k.isActive && (
+                      <Button variant="ghost" size="sm" onClick={() => revokeApiKeyMutation.mutate({ keyId: k.id })}>
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Create key form */}
+            <div className="space-y-2 border border-border rounded-lg p-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Create API Key</p>
+              <Input
+                placeholder="Key name (e.g. CI/CD pipeline)"
+                value={newKeyName}
+                onChange={(e) => setNewKeyName(e.target.value)}
+                className="text-sm"
+              />
+              <div className="flex flex-wrap gap-2">
+                {["sandbox:read", "sandbox:scan", "sandbox:delete"].map((scope) => (
+                  <label key={scope} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newKeyScopes.includes(scope)}
+                      onChange={(e) => setNewKeyScopes(e.target.checked ? [...newKeyScopes, scope] : newKeyScopes.filter((x) => x !== scope))}
+                      className="rounded"
+                    />
+                    {scope}
+                  </label>
+                ))}
+              </div>
+              <Button
+                size="sm"
+                disabled={!newKeyName || createApiKeyMutation.isPending}
+                onClick={() => createApiKeyMutation.mutate({ name: newKeyName, scopes: newKeyScopes as any })}
+              >
+                <Key className="h-3.5 w-3.5 mr-1.5" /> Generate Key
+              </Button>
+            </div>
+          </CardContent>
+        )}
+      </Card>
     </div>
   );
 }

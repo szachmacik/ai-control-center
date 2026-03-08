@@ -22,6 +22,7 @@ import SandboxDetail from "./pages/SandboxDetail";
 import MetaAds from "./pages/MetaAds";
 import SandboxCompare from "./pages/SandboxCompare";
 import Knowledge from "./pages/Knowledge";
+import TaskDetail from "./pages/TaskDetail";
 import DashboardLayout from "./components/DashboardLayout";
 import AuthCallback from "./pages/AuthCallback";
 import { Loader2 } from "lucide-react";
@@ -55,6 +56,7 @@ function Router() {
       <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/agents" component={() => <ProtectedRoute component={Agents} />} />
       <Route path="/tasks" component={() => <ProtectedRoute component={Tasks} />} />
+      <Route path="/tasks/:id" component={() => <ProtectedRoute component={TaskDetail} />} />
       <Route path="/infrastructure" component={() => <ProtectedRoute component={Infrastructure} />} />
       <Route path="/secrets" component={() => <ProtectedRoute component={Secrets} adminOnly />} />
       <Route path="/logs" component={() => <ProtectedRoute component={Logs} />} />

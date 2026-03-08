@@ -546,3 +546,71 @@ export async function getDriveFiles(taskId?: number, agentId?: number) {
   }
   return db.select().from(driveFiles).orderBy(desc(driveFiles.uploadedAt)).limit(50);
 }
+
+// ─── Task getById ─────────────────────────────────────────────────────────────
+
+export async function getTaskById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
+  return task ?? null;
+}
+
+// ─── Knowledge Files ──────────────────────────────────────────────────────────
+
+import { knowledgeFiles, type KnowledgeFile, type InsertKnowledgeFile } from "../drizzle/schema";
+
+export async function listKnowledgeFiles(userId: number, search?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select()
+    .from(knowledgeFiles)
+    .where(eq(knowledgeFiles.userId, userId))
+    .orderBy(desc(knowledgeFiles.createdAt));
+  if (!search) return rows;
+  const q = search.toLowerCase();
+  return rows.filter(
+    (r) =>
+      r.title.toLowerCase().includes(q) ||
+      (r.description ?? "").toLowerCase().includes(q) ||
+      r.category.toLowerCase().includes(q)
+  );
+}
+
+export async function createKnowledgeFile(data: Omit<InsertKnowledgeFile, "id" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [result] = await db.insert(knowledgeFiles).values({
+    ...data,
+    viewCount: 0,
+    isStarred: data.isStarred ?? false,
+  });
+  return { id: (result as any).insertId as number };
+}
+
+export async function deleteKnowledgeFile(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [file] = await db.select().from(knowledgeFiles).where(eq(knowledgeFiles.id, id)).limit(1);
+  if (!file || file.userId !== userId) throw new Error("File not found or access denied");
+  await db.delete(knowledgeFiles).where(eq(knowledgeFiles.id, id));
+  return { storageKey: file.storageKey };
+}
+
+export async function toggleKnowledgeStar(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [file] = await db.select().from(knowledgeFiles).where(eq(knowledgeFiles.id, id)).limit(1);
+  if (!file || file.userId !== userId) throw new Error("File not found or access denied");
+  await db.update(knowledgeFiles).set({ isStarred: !file.isStarred }).where(eq(knowledgeFiles.id, id));
+  return { isStarred: !file.isStarred };
+}
+
+export async function incrementKnowledgeViewCount(id: number) {
+  const db = await getDb();
+  if (!db) return;
+  const [file] = await db.select({ viewCount: knowledgeFiles.viewCount }).from(knowledgeFiles).where(eq(knowledgeFiles.id, id)).limit(1);
+  if (!file) return;
+  await db.update(knowledgeFiles).set({ viewCount: (file.viewCount ?? 0) + 1 }).where(eq(knowledgeFiles.id, id));
+}

@@ -8,7 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { sandboxEnvironments, sandboxScans, sandboxFindings, sandboxSchedules } from "../../drizzle/schema";
+import { sandboxEnvironments, sandboxScans, sandboxFindings, sandboxSchedules, sandboxWebhooks, sentinelApiKeys } from "../../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { detectTechStack } from "./tech-detector";
 import { generateEnvironment, describeEnvironment } from "./env-generator";
@@ -22,6 +22,9 @@ import {
 } from "./lifecycle";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as crypto from "crypto";
+import * as https from "https";
+import * as http from "http";
 import { generateReport } from "./reportGenerator";
 import { runScan } from "./scanner";
 import { compareScans, buildTrendSeries, type ScanSnapshot } from "./scanComparator";
@@ -113,6 +116,59 @@ async function getSandboxOrThrow(id: number, userId: number) {
     throw new TRPCError({ code: "NOT_FOUND", message: "Sandbox not found or access denied" });
   }
   return { db, sandbox };
+}
+
+// ─── Webhook dispatcher ─────────────────────────────────────────────────────
+
+async function dispatchWebhook(
+  url: string,
+  secret: string | null,
+  payload: Record<string, unknown>
+): Promise<{ statusCode: number; success: boolean }> {
+  return new Promise((resolve) => {
+    const body = JSON.stringify(payload);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const signature = secret
+      ? "sha256=" + crypto.createHmac("sha256", secret).update(timestamp + "." + body).digest("hex")
+      : "";
+
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { resolve({ statusCode: 0, success: false }); return; }
+
+    const lib = parsed.protocol === "https:" ? https : http;
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+        "X-Sentinel-Signature": signature,
+        "X-Sentinel-Timestamp": timestamp,
+        "User-Agent": "Sentinel-Webhook/1.0",
+      },
+      timeout: 10_000,
+    };
+
+    const req = lib.request(options, (res) => {
+      res.resume(); // drain
+      resolve({ statusCode: res.statusCode ?? 0, success: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300 });
+    });
+    req.on("error", () => resolve({ statusCode: 0, success: false }));
+    req.on("timeout", () => { req.destroy(); resolve({ statusCode: 0, success: false }); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ─── API key helpers ──────────────────────────────────────────────────────────
+
+function generateApiKey(): { raw: string; prefix: string; hash: string } {
+  const raw = "sk-" + crypto.randomBytes(32).toString("base64url");
+  const prefix = raw.slice(0, 12);
+  const hash = crypto.createHash("sha256").update(raw).digest("hex");
+  return { raw, prefix, hash };
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -996,6 +1052,122 @@ export const sandboxRouter = router({
       const filename = `sentinel-${safeName}-scan${scanId}-${dateStr}.sarif`;
       return { sarif: JSON.stringify(sarif, null, 2), filename, findingCount: findings.length };
     }),
+
+  // ── Webhook management ──────────────────────────────────────────────────────────────────
+
+  listWebhooks: protectedProcedure
+    .input(z.object({ sandboxId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      const { db } = await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      return db
+        .select()
+        .from(sandboxWebhooks)
+        .where(and(eq(sandboxWebhooks.sandboxId, input.sandboxId), eq(sandboxWebhooks.userId, ctx.user.id)))
+        .orderBy(desc(sandboxWebhooks.createdAt));
+    }),
+
+  createWebhook: protectedProcedure
+    .input(z.object({
+      sandboxId: z.number(),
+      url: z.string().url(),
+      secret: z.string().max(128).optional(),
+      events: z.array(z.enum(["scan.completed", "scan.failed", "critical.found"])).default(["scan.completed"]),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await getSandboxOrThrow(input.sandboxId, ctx.user.id);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // Max 5 webhooks per sandbox
+      const existing = await db.select({ id: sandboxWebhooks.id }).from(sandboxWebhooks)
+        .where(and(eq(sandboxWebhooks.sandboxId, input.sandboxId), eq(sandboxWebhooks.isActive, true)));
+      if (existing.length >= 5) throw new TRPCError({ code: "BAD_REQUEST", message: "Max 5 webhooks per sandbox" });
+      const [result] = await db.insert(sandboxWebhooks).values({
+        sandboxId: input.sandboxId,
+        userId: ctx.user.id,
+        url: input.url,
+        secret: input.secret ?? null,
+        events: input.events,
+        isActive: true,
+        failureCount: 0,
+      });
+      return { id: (result as any).insertId as number };
+    }),
+
+  deleteWebhook: protectedProcedure
+    .input(z.object({ webhookId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [wh] = await db.select().from(sandboxWebhooks).where(eq(sandboxWebhooks.id, input.webhookId)).limit(1);
+      if (!wh || wh.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "Webhook not found" });
+      await db.delete(sandboxWebhooks).where(eq(sandboxWebhooks.id, input.webhookId));
+      return { success: true };
+    }),
+
+  testWebhook: protectedProcedure
+    .input(z.object({ webhookId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [wh] = await db.select().from(sandboxWebhooks).where(eq(sandboxWebhooks.id, input.webhookId)).limit(1);
+      if (!wh || wh.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "Webhook not found" });
+      const payload = { event: "test", sandboxId: wh.sandboxId, timestamp: new Date().toISOString(), message: "Sentinel webhook test" };
+      const result = await dispatchWebhook(wh.url, wh.secret ?? null, payload);
+      await db.update(sandboxWebhooks).set({ lastTriggeredAt: new Date(), lastStatusCode: result.statusCode }).where(eq(sandboxWebhooks.id, wh.id));
+      return result;
+    }),
+
+  // ── API Key management ───────────────────────────────────────────────────────────────────
+
+  listApiKeys: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return [];
+    const keys = await db.select().from(sentinelApiKeys)
+      .where(eq(sentinelApiKeys.userId, ctx.user.id))
+      .orderBy(desc(sentinelApiKeys.createdAt));
+    // Never return keyHash — only prefix for display
+    return keys.map(({ keyHash: _kh, ...rest }) => rest);
+  }),
+
+  createApiKey: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(128),
+      scopes: z.array(z.enum(["sandbox:read", "sandbox:scan", "sandbox:delete"])).default(["sandbox:read"]),
+      expiresInDays: z.number().min(1).max(365).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // Max 10 API keys per user
+      const existing = await db.select({ id: sentinelApiKeys.id }).from(sentinelApiKeys)
+        .where(and(eq(sentinelApiKeys.userId, ctx.user.id), eq(sentinelApiKeys.isActive, true)));
+      if (existing.length >= 10) throw new TRPCError({ code: "BAD_REQUEST", message: "Max 10 API keys per account" });
+      const { raw, prefix, hash } = generateApiKey();
+      const expiresAt = input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
+      const [result] = await db.insert(sentinelApiKeys).values({
+        userId: ctx.user.id,
+        name: input.name,
+        keyHash: hash,
+        keyPrefix: prefix,
+        scopes: input.scopes,
+        isActive: true,
+        expiresAt,
+        usageCount: 0,
+      });
+      // Return raw key ONCE — never stored in plaintext
+      return { id: (result as any).insertId as number, key: raw, prefix, name: input.name, scopes: input.scopes };
+    }),
+
+  revokeApiKey: protectedProcedure
+    .input(z.object({ keyId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [key] = await db.select().from(sentinelApiKeys).where(eq(sentinelApiKeys.id, input.keyId)).limit(1);
+      if (!key || key.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "API key not found" });
+      await db.update(sentinelApiKeys).set({ isActive: false }).where(eq(sentinelApiKeys.id, input.keyId));
+      return { success: true };
+    }),
 });
 
 // ─── Shared scan runner (used by create + startScan) ─────────────────────────
@@ -1100,6 +1272,51 @@ async function runSandboxScan(
       }
     } catch {
       // Notification failure should not break scan result
+    }
+
+    // Dispatch webhooks for scan.completed and critical.found events
+    try {
+      const webhooks = await db
+        .select()
+        .from(sandboxWebhooks)
+        .where(and(eq(sandboxWebhooks.sandboxId, sandboxId), eq(sandboxWebhooks.isActive, true)));
+
+      if (webhooks.length > 0) {
+        const hasCritical = (result.summary.critical ?? 0) > 0;
+        const payload = {
+          event: "scan.completed",
+          sandboxId,
+          scanId: scanId ?? null,
+          scanType,
+          summary: result.summary,
+          riskScore: (result as any).riskScore ?? null,
+          timestamp: new Date().toISOString(),
+        };
+
+        for (const wh of webhooks) {
+          const events: string[] = Array.isArray(wh.events) ? (wh.events as string[]) : [];
+          const shouldFire = events.includes("scan.completed") || (hasCritical && events.includes("critical.found"));
+          if (!shouldFire) continue;
+
+          const dispatchPayload = hasCritical && events.includes("critical.found")
+            ? { ...payload, event: "critical.found" }
+            : payload;
+
+          dispatchWebhook(wh.url, wh.secret ?? null, dispatchPayload)
+            .then(async (res) => {
+              await db.update(sandboxWebhooks).set({
+                lastTriggeredAt: new Date(),
+                lastStatusCode: res.statusCode,
+                failureCount: res.success ? 0 : (wh.failureCount ?? 0) + 1,
+                // Auto-disable after 10 consecutive failures
+                isActive: res.success ? true : (wh.failureCount ?? 0) + 1 < 10,
+              }).where(eq(sandboxWebhooks.id, wh.id));
+            })
+            .catch(() => {});
+        }
+      }
+    } catch {
+      // Webhook dispatch failure should not break scan result
     }
   } catch (err) {
     if (scanId) {

@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { formatDistanceToNow } from "date-fns";
+import { useLocation } from "wouter";
 
 type Priority = "low" | "medium" | "high" | "urgent";
 
@@ -43,6 +44,7 @@ const PRIORITY_ICON: Record<Priority, React.ReactNode> = {
 
 function TaskDetailSheet({ task, open, onClose }: { task: any; open: boolean; onClose: () => void }) {
   const isRunning = task?.status === "running";
+  const [, navigate] = useLocation();
 
   const { data: logs = [], isLoading: logsLoading } = trpc.tasks.getLogs.useQuery(
     { taskId: task?.id ?? 0 },
@@ -109,9 +111,17 @@ function TaskDetailSheet({ task, open, onClose }: { task: any; open: boolean; on
                 {task.assignedTo}
               </span>
             )}
-            <span className="text-[10px] text-muted-foreground ml-auto">
+            <span className="text-[10px] text-muted-foreground">
               Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
             </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs gap-1 ml-auto"
+              onClick={() => { onClose(); navigate(`/tasks/${task.id}`); }}
+            >
+              <ExternalLink className="w-3 h-3" /> Full Detail
+            </Button>
           </div>
 
           {/* Action buttons */}

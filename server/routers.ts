@@ -27,11 +27,13 @@ import {
   listAgents, updateAgentStatus, getAgentById, getAgentTasks, incrementAgentTasksCompleted,
   createAgent, updateAgent, deleteAgent,
   listTasks, createTask, updateTaskStatus, addTaskLog, getTaskLogs, addDriveFile, getDriveFiles,
+  getTaskById,
   listInfrastructure, seedInfrastructure, seedAgents, checkInfrastructureHealth,
   listSecrets, createSecret, deleteSecret,
   listLogs,
   listProjects, createProject,
   getDashboardStats,
+  listKnowledgeFiles, createKnowledgeFile, deleteKnowledgeFile, toggleKnowledgeStar, incrementKnowledgeViewCount,
 } from "./db";
 
 // Admin-only guard
@@ -165,6 +167,40 @@ export const appRouter = router({
     getLogs: protectedProcedure
       .input(z.object({ taskId: z.number() }))
       .query(({ input }) => getTaskLogs(input.taskId)),
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(({ input }) => getTaskById(input.id)),
+    getDriveFiles: protectedProcedure
+      .input(z.object({ taskId: z.number() }))
+      .query(({ input }) => getDriveFiles(input.taskId)),
+  }),
+
+  knowledge: router({
+    list: protectedProcedure
+      .input(z.object({ search: z.string().optional() }))
+      .query(({ input, ctx }) => listKnowledgeFiles(ctx.user.id, input.search)),
+    create: protectedProcedure
+      .input(z.object({
+        title: z.string().min(1).max(255),
+        description: z.string().optional(),
+        category: z.string().max(64).default("general"),
+        tags: z.array(z.string()).optional(),
+        fileName: z.string().min(1).max(255),
+        fileSize: z.number().optional(),
+        mimeType: z.string().optional(),
+        storageKey: z.string().min(1).max(512),
+        publicUrl: z.string().url().optional(),
+      }))
+      .mutation(({ input, ctx }) => createKnowledgeFile({ ...input, userId: ctx.user.id, tags: input.tags ?? null, isStarred: false })),
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input, ctx }) => deleteKnowledgeFile(input.id, ctx.user.id)),
+    toggleStar: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input, ctx }) => toggleKnowledgeStar(input.id, ctx.user.id)),
+    incrementView: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => incrementKnowledgeViewCount(input.id)),
   }),
 
   infrastructure: router({

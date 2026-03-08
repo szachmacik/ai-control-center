@@ -409,3 +409,63 @@ export const sandboxUserPrefs = mysqlTable("sandbox_user_prefs", {
 });
 export type SandboxUserPrefs = typeof sandboxUserPrefs.$inferSelect;
 export type InsertSandboxUserPrefs = typeof sandboxUserPrefs.$inferInsert;
+
+// ─── Sandbox Webhooks ─────────────────────────────────────────────────────────
+// Per-sandbox webhook configurations — called after scan completion
+export const sandboxWebhooks = mysqlTable("sandbox_webhooks", {
+  id: int("id").autoincrement().primaryKey(),
+  sandboxId: int("sandbox_id").notNull(),
+  userId: int("user_id").notNull(),
+  url: varchar("url", { length: 512 }).notNull(),
+  secret: varchar("secret", { length: 128 }),                                   // HMAC-SHA256 signing secret
+  events: json("events"),                                                        // ["scan.completed", "scan.failed", "critical.found"]
+  isActive: boolean("is_active").default(true).notNull(),
+  lastTriggeredAt: timestamp("last_triggered_at"),
+  lastStatusCode: int("last_status_code"),
+  failureCount: int("failure_count").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type SandboxWebhook = typeof sandboxWebhooks.$inferSelect;
+export type InsertSandboxWebhook = typeof sandboxWebhooks.$inferInsert;
+
+// ─── Sentinel API Keys ────────────────────────────────────────────────────────
+// API keys for external clients accessing Sentinel via REST (SaaS mode)
+export const sentinelApiKeys = mysqlTable("sentinel_api_keys", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  name: varchar("name", { length: 128 }).notNull(),
+  keyHash: varchar("key_hash", { length: 64 }).notNull().unique(),              // SHA-256 of the raw key
+  keyPrefix: varchar("key_prefix", { length: 12 }).notNull(),                  // First 8 chars for display (e.g. "sk-abc123")
+  scopes: json("scopes"),                                                        // ["sandbox:read", "sandbox:scan", "sandbox:delete"]
+  isActive: boolean("is_active").default(true).notNull(),
+  expiresAt: timestamp("expires_at"),                                           // null = never expires
+  lastUsedAt: timestamp("last_used_at"),
+  usageCount: int("usage_count").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type SentinelApiKey = typeof sentinelApiKeys.$inferSelect;
+export type InsertSentinelApiKey = typeof sentinelApiKeys.$inferInsert;
+
+// ─── Knowledge Files ──────────────────────────────────────────────────────────
+// User-uploaded knowledge base files (Markdown, PDF, TXT) stored in Supabase Storage
+export const knowledgeFiles = mysqlTable("knowledge_files", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 64 }).notNull().default("general"),
+  tags: json("tags"),                                                            // string[]
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileSize: int("file_size"),                                                   // bytes
+  mimeType: varchar("mime_type", { length: 128 }),
+  storageKey: varchar("storage_key", { length: 512 }).notNull(),               // Supabase Storage path
+  publicUrl: varchar("public_url", { length: 512 }),
+  isStarred: boolean("is_starred").default(false).notNull(),
+  viewCount: int("view_count").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type KnowledgeFile = typeof knowledgeFiles.$inferSelect;
+export type InsertKnowledgeFile = typeof knowledgeFiles.$inferInsert;
