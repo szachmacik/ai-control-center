@@ -1,0 +1,38 @@
+name: Scheduled Health Check
+
+on:
+  schedule:
+    # Every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Production Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check production health
+        run: |
+          echo "Checking production health..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://ai-control-center.ofshore.dev/health 2>/dev/null || echo "000")
+          echo "Health endpoint: HTTP $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            echo "Production is healthy!"
+          else
+            echo "WARNING: Production health check returned $STATUS"
+          fi
+
+      - name: Check Coolify deploy status
+        if: ${{ secrets.COOLIFY_TOKEN != '' }}
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+            "https://coolify.ofshore.dev/api/v1/applications/${{ secrets.COOLIFY_APP_UUID }}")
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+          echo "Coolify app status HTTP: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('App status:', d.get('status', 'unknown'))" 2>/dev/null || echo "Could not parse response"
+          fi
