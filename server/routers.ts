@@ -35,6 +35,8 @@ import {
   getDashboardStats,
   listKnowledgeFiles, createKnowledgeFile, deleteKnowledgeFile, toggleKnowledgeStar, incrementKnowledgeViewCount,
   getAuditSchedule, saveAuditSchedule,
+  listLogsFiltered, dispatchAgentTask,
+  getVaultKeys, setVaultKey,
 } from "./db";
 
 // Admin-only guard
@@ -132,6 +134,15 @@ export const appRouter = router({
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteAgent(input.id)),
+    dispatchTask: protectedProcedure
+      .input(z.object({
+        agentId: z.number(),
+        agentName: z.string(),
+        title: z.string().min(1).max(255),
+        description: z.string().optional(),
+        priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+      }))
+      .mutation(({ input, ctx }) => dispatchAgentTask({ ...input, createdBy: ctx.user.id })),
   }),
 
   tasks: router({
@@ -262,6 +273,30 @@ export const appRouter = router({
     list: protectedProcedure
       .input(z.object({ search: z.string().optional() }))
       .query(({ input }) => listLogs(input.search)),
+    listFiltered: protectedProcedure
+      .input(z.object({
+        search: z.string().optional(),
+        eventType: z.enum(['all', 'info', 'warning', 'error', 'success']).optional(),
+        agentName: z.string().optional(),
+        limit: z.number().min(1).max(1000).optional(),
+      }))
+      .query(({ input }) => listLogsFiltered(input)),
+    exportCsv: protectedProcedure
+      .input(z.object({
+        search: z.string().optional(),
+        eventType: z.enum(['all', 'info', 'warning', 'error', 'success']).optional(),
+        agentName: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        const rows = await listLogsFiltered({ ...input, limit: 1000 });
+        const header = 'ID,Timestamp,EventType,AgentName,AgentID,TaskID,Message';
+        const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const lines = rows.map(r =>
+          [r.id, r.createdAt, r.eventType, r.agentName ?? '', r.agentId ?? '', r.taskId ?? '', r.message]
+            .map(escape).join(',')
+        );
+        return { csv: [header, ...lines].join('\n'), count: rows.length };
+      }),
   }),
 
   projects: router({
@@ -425,6 +460,15 @@ export const appRouter = router({
 
   settings: router({
     getSchedule: protectedProcedure.query(() => getAuditSchedule()),
+    vault: router({
+      list: adminProcedure.query(() => getVaultKeys()),
+      set: adminProcedure
+        .input(z.object({
+          keyName: z.enum(['COOLIFY_TOKEN', 'COOLIFY_WEBHOOK_URL', 'GITHUB_PAT']),
+          keyValue: z.string().min(1),
+        }))
+        .mutation(({ input }) => setVaultKey(input.keyName as any, input.keyValue)),
+    }),
     saveSchedule: adminProcedure
       .input(z.object({
         uptimeEnabled: z.boolean(),

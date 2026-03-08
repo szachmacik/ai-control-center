@@ -382,6 +382,23 @@ export async function listLogs(search?: string) {
   return db.select().from(agentLogs).orderBy(desc(agentLogs.createdAt)).limit(200);
 }
 
+export async function listLogsFiltered(opts: {
+  search?: string;
+  eventType?: string;
+  agentName?: string;
+  limit?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  let q = db.select().from(agentLogs);
+  const conditions: any[] = [];
+  if (opts.search) conditions.push(like(agentLogs.message, `%${opts.search}%`));
+  if (opts.eventType && opts.eventType !== 'all') conditions.push(eq(agentLogs.eventType, opts.eventType as any));
+  if (opts.agentName) conditions.push(like(agentLogs.agentName, `%${opts.agentName}%`));
+  const base = conditions.length > 0 ? q.where(conditions.length === 1 ? conditions[0] : conditions.reduce((a, b) => ({ ...a, ...b }))) : q;
+  return base.orderBy(desc(agentLogs.createdAt)).limit(opts.limit ?? 500);
+}
+
 export async function createLog(data: {
   agentId?: number;
   agentName?: string;
@@ -400,6 +417,39 @@ export async function createLog(data: {
     message: data.message,
     details: data.details ?? null,
   });
+}
+
+export async function dispatchAgentTask(data: {
+  agentId: number;
+  agentName: string;
+  title: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database unavailable');
+  // Create task
+  const [res] = await db.insert(tasks).values({
+    title: data.title,
+    description: data.description ?? null,
+    agentId: data.agentId,
+    assignedTo: data.agentName,
+    priority: data.priority ?? 'medium',
+    status: 'pending',
+    createdBy: data.createdBy ?? null,
+  });
+  const taskId = (res as any).insertId as number;
+  // Log the dispatch
+  await db.insert(agentLogs).values({
+    agentId: data.agentId,
+    agentName: data.agentName,
+    taskId,
+    eventType: 'info',
+    message: `Task dispatched: ${data.title}`,
+    details: { priority: data.priority ?? 'medium' },
+  });
+  return { taskId };
 }
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
@@ -668,5 +718,57 @@ export async function saveAuditSchedule(settings: AuditScheduleSettings): Promis
     await db.update(secrets).set({ value: json }).where(eq(secrets.name, SCHEDULE_SECRET_NAME));
   } else {
     await db.insert(secrets).values({ name: SCHEDULE_SECRET_NAME, value: json, description: "Audit schedule configuration" });
+  }
+}
+
+// ─── Vault Key Manager (autodeploy_vault via Supabase REST) ─────────────────────────────────────────────────────────────────
+
+const VAULT_KEYS = ['COOLIFY_TOKEN', 'COOLIFY_WEBHOOK_URL', 'GITHUB_PAT'] as const;
+export type VaultKeyName = typeof VAULT_KEYS[number];
+
+export async function getVaultKeys(): Promise<Array<{ key_name: string; is_set: boolean; hint: string }>> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_KEY;
+  if (!url || !key) return VAULT_KEYS.map(k => ({ key_name: k, is_set: false, hint: '' }));
+  try {
+    const res = await fetch(`${url}/rest/v1/autodeploy_vault?select=key_name,key_value`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+    const data = await res.json() as Array<{ key_name: string; key_value: string }>;
+    return VAULT_KEYS.map(k => {
+      const row = data.find(r => r.key_name === k);
+      const v = row?.key_value ?? '';
+      return {
+        key_name: k,
+        is_set: v.length > 0,
+        hint: v.length > 4 ? v.slice(0, 4) + '...' + v.slice(-4) : (v.length > 0 ? '****' : ''),
+      };
+    });
+  } catch {
+    return VAULT_KEYS.map(k => ({ key_name: k, is_set: false, hint: '' }));
+  }
+}
+
+export async function setVaultKey(keyName: VaultKeyName, keyValue: string): Promise<void> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_KEY;
+  if (!url || !key) throw new Error('Supabase not configured');
+  // Check if row exists
+  const check = await fetch(`${url}/rest/v1/autodeploy_vault?key_name=eq.${keyName}&select=id`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  });
+  const rows = await check.json() as Array<{ id: number }>;
+  if (rows.length > 0) {
+    await fetch(`${url}/rest/v1/autodeploy_vault?key_name=eq.${keyName}`, {
+      method: 'PATCH',
+      headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ key_value: keyValue }),
+    });
+  } else {
+    await fetch(`${url}/rest/v1/autodeploy_vault`, {
+      method: 'POST',
+      headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ key_name: keyName, key_value: keyValue }),
+    });
   }
 }

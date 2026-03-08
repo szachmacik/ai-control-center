@@ -26,10 +26,14 @@ import {
   Monitor,
   Moon,
   Sun,
+  Lock,
+  Eye,
+  EyeOff,
+  Rocket,
 } from "lucide-react";
 import { toast } from "sonner";
 
-type Tab = "profile" | "appearance" | "notifications" | "audit-schedule" | "api" | "danger";
+type Tab = "profile" | "appearance" | "notifications" | "audit-schedule" | "api" | "vault" | "danger";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "profile", label: "Profile", icon: User },
@@ -37,6 +41,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "audit-schedule", label: "Audit Schedule", icon: Calendar },
   { id: "api", label: "API Access", icon: Key },
+  { id: "vault", label: "Deploy Vault", icon: Lock },
   { id: "danger", label: "Danger Zone", icon: AlertTriangle },
 ];
 
@@ -73,6 +78,17 @@ export default function Settings() {
   }
   const saveScheduleMutation = trpc.settings.saveSchedule.useMutation({
     onSuccess: () => toast.success("Schedule saved and persisted to database"),
+    onError: (e) => toast.error(e.message),
+  });
+
+  // Vault Key Manager
+  const { data: vaultKeys, refetch: refetchVault } = trpc.settings.vault.list.useQuery(
+    undefined, { enabled: activeTab === "vault" }
+  );
+  const [vaultEdits, setVaultEdits] = useState<Record<string, string>>({});
+  const [vaultVisible, setVaultVisible] = useState<Record<string, boolean>>({});
+  const setVaultKey = trpc.settings.vault.set.useMutation({
+    onSuccess: () => { toast.success("Key saved to Vault"); refetchVault(); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -338,6 +354,80 @@ export default function Settings() {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {/* Deploy Vault */}
+          {activeTab === "vault" && (
+            <div className="space-y-4">
+              <Card className="bg-card border-border">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-primary" />
+                    Deploy Vault
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Klucze autodeploymentu (DO + Coolify + GitHub). Dane są przechowywane w Supabase Vault i nigdy nie są logowane.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {(vaultKeys ?? [
+                    { key_name: 'COOLIFY_TOKEN', is_set: false, hint: '' },
+                    { key_name: 'COOLIFY_WEBHOOK_URL', is_set: false, hint: '' },
+                    { key_name: 'GITHUB_PAT', is_set: false, hint: '' },
+                  ]).map((k) => (
+                    <div key={k.key_name} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs font-mono">{k.key_name}</Label>
+                          {k.is_set ? (
+                            <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-400/30">Set ✓</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30">Not set</Badge>
+                          )}
+                        </div>
+                        {k.is_set && k.hint && (
+                          <span className="text-[10px] font-mono text-muted-foreground">{k.hint}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <Input
+                            type={vaultVisible[k.key_name] ? 'text' : 'password'}
+                            placeholder={k.is_set ? '(leave blank to keep current)' : `Enter ${k.key_name}…`}
+                            value={vaultEdits[k.key_name] ?? ''}
+                            onChange={e => setVaultEdits(v => ({ ...v, [k.key_name]: e.target.value }))}
+                            className="pr-9 font-mono text-xs h-9 bg-input border-border"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setVaultVisible(v => ({ ...v, [k.key_name]: !v[k.key_name] }))}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          >
+                            {vaultVisible[k.key_name] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        <Button
+                          size="sm" className="h-9 shrink-0"
+                          disabled={!vaultEdits[k.key_name] || setVaultKey.isPending}
+                          onClick={() => setVaultKey.mutate({ keyName: k.key_name as any, keyValue: vaultEdits[k.key_name] })}
+                        >
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <Rocket className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
+                <div className="text-xs text-blue-300 space-y-1">
+                  <p className="font-medium">Jak uzyskać klucze:</p>
+                  <p><strong>COOLIFY_TOKEN</strong> — <a href="https://coolify.ofshore.dev/profile" target="_blank" rel="noopener noreferrer" className="underline">coolify.ofshore.dev/profile</a> → API Tokens → Create</p>
+                  <p><strong>COOLIFY_WEBHOOK_URL</strong> — Coolify → Twoja aplikacja → Settings → Deploy Webhook URL</p>
+                  <p><strong>GITHUB_PAT</strong> — <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer" className="underline">github.com/settings/tokens</a> → Permissions: Actions/Secrets/Workflows/Contents R/W</p>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Danger Zone */}

@@ -24,6 +24,7 @@ import {
   Bot, Play, Square, RefreshCw, ChevronRight, Cpu, Brain,
   FolderOpen, Zap, Network, Sparkles, ExternalLink, Activity,
   CheckCircle2, XCircle, Clock, AlertCircle, Info, Hash, Plus, Trash2,
+  SendHorizonal,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -235,7 +236,59 @@ function CreateAgentDialog({ open, onClose, onCreated }: { open: boolean; onClos
   );
 }
 
-function AgentCard({ agent, onSelect, updateStatus, onDelete }: { agent: any; onSelect: (id: number) => void; updateStatus: any; onDelete: (id: number) => void }) {
+function DispatchTaskDialog({ agent, open, onClose }: { agent: any; open: boolean; onClose: () => void }) {
+  const [form, setForm] = useState({ title: "", description: "", priority: "medium" as string });
+  const dispatch = trpc.agents.dispatchTask.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Task #${data.taskId} dispatched to ${agent?.name}`);
+      setForm({ title: "", description: "", priority: "medium" });
+      onClose();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <SendHorizonal className="w-4 h-4" />
+            Dispatch Task to {agent?.name}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs">Task Title *</Label>
+            <Input className="mt-1" placeholder="e.g. Analyze Q1 metrics" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+          </div>
+          <div>
+            <Label className="text-xs">Description</Label>
+            <Textarea className="mt-1 resize-none" rows={3} placeholder="Detailed instructions for the agent…" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+          </div>
+          <div>
+            <Label className="text-xs">Priority</Label>
+            <Select value={form.priority} onValueChange={v => setForm(f => ({ ...f, priority: v }))}>
+              <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {["low","medium","high","urgent"].map(p => (
+                  <SelectItem key={p} value={p} className="text-xs capitalize">{p}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" disabled={!form.title || dispatch.isPending}
+            onClick={() => dispatch.mutate({ agentId: agent.id, agentName: agent.name, title: form.title, description: form.description || undefined, priority: form.priority as any })}>
+            {dispatch.isPending ? "Dispatching…" : "Dispatch Task"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AgentCard({ agent, onSelect, updateStatus, onDelete, onDispatch }: { agent: any; onSelect: (id: number) => void; updateStatus: any; onDelete: (id: number) => void; onDispatch: (agent: any) => void }) {
   const agentType = agent.agentType ?? "custom";
   return (
     <Card className="bg-card border-border hover:border-border/80 transition-all">
@@ -285,6 +338,9 @@ function AgentCard({ agent, onSelect, updateStatus, onDelete }: { agent: any; on
               <Square className="w-3 h-3 mr-1" />Deactivate
             </Button>
           )}
+          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-primary" title="Dispatch task" onClick={() => onDispatch(agent)}>
+            <SendHorizonal className="w-3.5 h-3.5" />
+          </Button>
           <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground" onClick={() => onSelect(agent.id)}>
             <ChevronRight className="w-4 h-4" />
           </Button>
@@ -304,6 +360,7 @@ export default function Agents() {
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [dispatchAgent, setDispatchAgent] = useState<any>(null);
   const { data: agents, isLoading, refetch } = trpc.agents.list.useQuery(undefined, { refetchInterval: 10_000 });
   const { data: secrets } = trpc.secrets.list.useQuery();
   const updateStatus = trpc.agents.updateStatus.useMutation({
@@ -367,7 +424,7 @@ export default function Agents() {
             <section>
               <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2"><Brain className="w-3.5 h-3.5" />AI Agents</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {aiAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} onDelete={setDeleteId} />)}
+                {aiAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} onDelete={setDeleteId} onDispatch={setDispatchAgent} />)}
               </div>
             </section>
           )}
@@ -375,7 +432,7 @@ export default function Agents() {
             <section>
               <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2"><Bot className="w-3.5 h-3.5" />Custom Agents</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {customAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} onDelete={setDeleteId} />)}
+                {customAgents.map((a: any) => <AgentCard key={a.id} agent={a} onSelect={setSelectedAgentId} updateStatus={updateStatus} onDelete={setDeleteId} onDispatch={setDispatchAgent} />)}
               </div>
             </section>
           )}
@@ -387,6 +444,7 @@ export default function Agents() {
         </>
       )}
       <AgentDetailSheet agentId={selectedAgentId} open={!!selectedAgentId} onClose={() => setSelectedAgentId(null)} />
+      <DispatchTaskDialog agent={dispatchAgent} open={!!dispatchAgent} onClose={() => setDispatchAgent(null)} />
       <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={refetch} />
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
