@@ -614,3 +614,59 @@ export async function incrementKnowledgeViewCount(id: number) {
   if (!file) return;
   await db.update(knowledgeFiles).set({ viewCount: (file.viewCount ?? 0) + 1 }).where(eq(knowledgeFiles.id, id));
 }
+// ─── Audit Schedule (persisted in secrets table as AUDIT_SCHEDULE) ───────────
+const SCHEDULE_SECRET_NAME = "AUDIT_SCHEDULE";
+
+export interface AuditScheduleSettings {
+  uptimeEnabled: boolean;
+  uptimeCron: string;
+  securityEnabled: boolean;
+  securityCron: string;
+  functionalEnabled: boolean;
+  functionalCron: string;
+  dependencyEnabled: boolean;
+  dependencyCron: string;
+  dbHealthEnabled: boolean;
+  dbHealthCron: string;
+}
+
+const DEFAULT_SCHEDULE: AuditScheduleSettings = {
+  uptimeEnabled: true,
+  uptimeCron: "0 0 8 * * *",
+  securityEnabled: true,
+  securityCron: "0 0 2 * * 1",
+  functionalEnabled: true,
+  functionalCron: "0 0 3 * * 1",
+  dependencyEnabled: true,
+  dependencyCron: "0 0 4 * * 1",
+  dbHealthEnabled: true,
+  dbHealthCron: "0 0 5 1 * *",
+};
+
+export async function getAuditSchedule(): Promise<AuditScheduleSettings> {
+  const db = await getDb();
+  if (!db) return DEFAULT_SCHEDULE;
+  const rows = await db
+    .select()
+    .from(secrets)
+    .where(eq(secrets.name, SCHEDULE_SECRET_NAME))
+    .limit(1);
+  if (rows.length === 0) return DEFAULT_SCHEDULE;
+  try {
+    return JSON.parse(rows[0].value) as AuditScheduleSettings;
+  } catch {
+    return DEFAULT_SCHEDULE;
+  }
+}
+
+export async function saveAuditSchedule(settings: AuditScheduleSettings): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const json = JSON.stringify(settings);
+  const existing = await db.select().from(secrets).where(eq(secrets.name, SCHEDULE_SECRET_NAME)).limit(1);
+  if (existing.length > 0) {
+    await db.update(secrets).set({ value: json }).where(eq(secrets.name, SCHEDULE_SECRET_NAME));
+  } else {
+    await db.insert(secrets).values({ name: SCHEDULE_SECRET_NAME, value: json, description: "Audit schedule configuration" });
+  }
+}

@@ -34,6 +34,7 @@ import {
   listProjects, createProject,
   getDashboardStats,
   listKnowledgeFiles, createKnowledgeFile, deleteKnowledgeFile, toggleKnowledgeStar, incrementKnowledgeViewCount,
+  getAuditSchedule, saveAuditSchedule,
 } from "./db";
 
 // Admin-only guard
@@ -420,6 +421,24 @@ export const appRouter = router({
         .input(z.object({ taskType: z.string(), payload: z.record(z.string(), z.unknown()).optional() }))
         .mutation(({ input }) => insertManusTask({ taskType: input.taskType, payload: input.payload ?? {}, submittedBy: "sentinel-ui" })),
     }),
+  }),
+
+  settings: router({
+    getSchedule: protectedProcedure.query(() => getAuditSchedule()),
+    saveSchedule: adminProcedure
+      .input(z.object({
+        uptimeEnabled: z.boolean(),
+        uptimeCron: z.string(),
+        securityEnabled: z.boolean(),
+        securityCron: z.string(),
+        functionalEnabled: z.boolean(),
+        functionalCron: z.string(),
+        dependencyEnabled: z.boolean(),
+        dependencyCron: z.string(),
+        dbHealthEnabled: z.boolean(),
+        dbHealthCron: z.string(),
+      }))
+      .mutation(({ input }) => saveAuditSchedule(input)),
   }),
 });
 

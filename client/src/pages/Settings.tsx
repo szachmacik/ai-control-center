@@ -66,6 +66,15 @@ export default function Settings() {
     dbHealthEnabled: true,
     dbHealthCron: "0 9 1 * *",
   });
+  // Load persisted schedule from DB
+  const { data: savedSchedule } = trpc.settings.getSchedule.useQuery();
+  if (savedSchedule && savedSchedule.uptimeCron !== schedule.uptimeCron) {
+    setSchedule(savedSchedule);
+  }
+  const saveScheduleMutation = trpc.settings.saveSchedule.useMutation({
+    onSuccess: () => toast.success("Schedule saved and persisted to database"),
+    onError: (e) => toast.error(e.message),
+  });
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() => toast.success("Copied to clipboard"));
@@ -264,8 +273,12 @@ export default function Settings() {
                       />
                     </div>
                   ))}
-                  <Button size="sm" onClick={() => toast.success("Schedule saved — takes effect on next server restart")}>
-                    Save schedule
+                  <Button
+                    size="sm"
+                    disabled={saveScheduleMutation.isPending}
+                    onClick={() => saveScheduleMutation.mutate(schedule)}
+                  >
+                    {saveScheduleMutation.isPending ? "Saving..." : "Save schedule"}
                   </Button>
                 </CardContent>
               </Card>
