@@ -23,14 +23,7 @@ import {
   handleManyChatWebhook as handleManyChatWebhookPost,
 } from "../meta/manychatWebhook";
 
-// SEC-011 FIX: Import helmet for security headers
-// Run: pnpm add helmet @types/helmet
-let helmet: any;
-try {
-  helmet = require("helmet");
-} catch {
-  console.warn("[Security] helmet not installed — run: pnpm add helmet");
-}
+// Security headers applied directly (no external dependency needed)
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -77,29 +70,33 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
 
-  // SEC-011 FIX: Apply helmet security headers
-  if (helmet) {
-    app.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", "data:", "blob:", "https:"],
-          connectSrc: ["'self'", "https://*.supabase.co", "wss://*.supabase.co"],
-          frameSrc: ["'none'"],
-          objectSrc: ["'none'"],
-          baseUri: ["'self'"],
-          upgradeInsecureRequests: [],
-        },
-      },
-      hsts: {
-        maxAge: 63072000,
-        includeSubDomains: true,
-        preload: true,
-      },
-    }));
-  }
+  // ─── Security Headers ────────────────────────────────────────────────────────
+  app.disable("x-powered-by");
+  app.use((_req, res, next) => {
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+        "frame-src 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+        "upgrade-insecure-requests",
+      ].join("; ")
+    );
+    next();
+  });
 
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
