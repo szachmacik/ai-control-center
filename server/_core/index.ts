@@ -1,4 +1,5 @@
 import express from "express";
+import { guardianRouter } from "../guardian";
 import path from "path";
 import { ensureDatabaseExists } from "../initDb";
 import { createServer } from "http";
@@ -233,7 +234,8 @@ async function startServer() {
 
     await setupVite(app, server);
   } else {
-    serveStatic(app);
+    app.use("/api/guardian", guardianRouter);
+  serveStatic(app);
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
