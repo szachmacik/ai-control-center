@@ -35,4 +35,5 @@ ENV NODE_ENV=production
 
 EXPOSE 3000
 
+LABEL build="1773816993"
 CMD ["sh", "docker-entrypoint.sh"]
