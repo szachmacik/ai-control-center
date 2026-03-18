@@ -234,7 +234,18 @@ async function startServer() {
 
     await setupVite(app, server);
   } else {
-    app.use("/api/guardian", guardianRouter);
+  
+  // Health check endpoint (wymagany przez monitoring i Coolify)
+  app.get("/api/health", (_req, res) => {
+    res.json({
+      status: "ok",
+      version: process.env.npm_package_version || "1.0.0",
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+    });
+  });
+
+  app.use("/api/guardian", guardianRouter);
   serveStatic(app);
   }
 
