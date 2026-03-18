@@ -1,4 +1,4 @@
-FROM node:22-alpine AS base
+FROM node:20-slim AS base
 WORKDIR /app
 RUN npm install -g pnpm
 
@@ -15,7 +15,7 @@ RUN pnpm run build && \
     ./node_modules/.bin/esbuild server/migrate.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
 
 # Production image - keep all deps since server imports vite at runtime
-FROM node:22-alpine AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
 RUN npm install -g pnpm
 
