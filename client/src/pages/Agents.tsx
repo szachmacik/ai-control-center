@@ -49,9 +49,10 @@ const AI_PROVIDERS = [
 ];
 
 function sColor(s: string) {
-  if (s === "active") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/25";
-  if (s === "idle") return "bg-amber-500/10 text-amber-400 border-amber-500/25";
-  if (s === "error") return "bg-destructive/10 text-destructive border-destructive/25";
+  if (s === "active" || s === "completed") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/25";
+  if (s === "idle" || s === "pending") return "bg-amber-500/10 text-amber-400 border-amber-500/25";
+  if (s === "error" || s === "failed") return "bg-destructive/10 text-destructive border-destructive/25";
+  if (s === "running") return "bg-blue-500/10 text-blue-400 border-blue-500/25";
   return "bg-muted/50 text-muted-foreground border-border";
 }
 function dColor(s: string) {
@@ -83,14 +84,14 @@ function logIcon(l?: string) {
 function AgentDetailSheet({ agentId, open, onClose }: { agentId: number | null; open: boolean; onClose: () => void }) {
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const { data: agent, isLoading: al } = trpc.agents.getById.useQuery(
-    { id: agentId! }, { enabled: !!agentId, refetchInterval: 10_000 }
+    { id: agentId! }, { enabled: !!agentId, refetchInterval: 5000 }
   );
   const { data: agentTasks, isLoading: tl } = trpc.agents.getTasks.useQuery(
-    { agentId: agentId!, limit: 20 }, { enabled: !!agentId, refetchInterval: 15_000 }
+    { agentId: agentId!, limit: 20 }, { enabled: !!agentId, refetchInterval: 5000 }
   );
   const { data: logs, isLoading: ll } = trpc.tasks.getLogs.useQuery(
     { taskId: selectedTaskId! },
-    { enabled: !!selectedTaskId, refetchInterval: selectedTaskId ? 3_000 : false }
+    { enabled: !!selectedTaskId, refetchInterval: selectedTaskId ? 2000 : false }
   );
   const selectedTask = agentTasks?.find((t: any) => t.id === selectedTaskId);
   if (!agentId) return null;
@@ -105,6 +106,11 @@ function AgentDetailSheet({ agentId, open, onClose }: { agentId: number | null; 
               </div>
             )}
             <span>{al ? "Loading…" : agent?.name ?? "Agent"}</span>
+            {agent?.status === "active" && (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-normal ml-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />Live
+              </span>
+            )}
           </SheetTitle>
           {agent && (
             <SheetDescription className="text-xs text-muted-foreground">
@@ -136,8 +142,11 @@ function AgentDetailSheet({ agentId, open, onClose }: { agentId: number | null; 
               </a>
             )}
             <div>
-              <p className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Hash className="w-3.5 h-3.5 text-muted-foreground" />Recent Tasks</p>
-              {tl ? <div className="text-xs text-muted-foreground">Loading…</div> : !agentTasks?.length ? (
+              <p className="text-sm font-semibold mb-2 flex items-center justify-between">
+                <span className="flex items-center gap-1.5"><Hash className="w-3.5 h-3.5 text-muted-foreground" />Recent Tasks</span>
+                {tl && <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground" />}
+              </p>
+              {tl && !agentTasks ? <div className="text-xs text-muted-foreground">Loading…</div> : !agentTasks?.length ? (
                 <div className="text-xs text-muted-foreground">No tasks assigned yet</div>
               ) : (
                 <div className="space-y-1.5">
@@ -157,9 +166,11 @@ function AgentDetailSheet({ agentId, open, onClose }: { agentId: number | null; 
             </div>
             {selectedTaskId && (
               <div>
-                <p className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-muted-foreground" />
-                  Logs — {selectedTask?.title}
+                <p className="text-sm font-semibold mb-2 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+                    Logs — {selectedTask?.title}
+                  </span>
                   {selectedTask?.status === "running" && (
                     <span className="flex items-center gap-1 text-[10px] text-blue-400 font-normal">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />Live
@@ -167,7 +178,7 @@ function AgentDetailSheet({ agentId, open, onClose }: { agentId: number | null; 
                   )}
                 </p>
                 <ScrollArea className="h-48 rounded-lg border border-border bg-muted/10 p-3">
-                  {ll ? <p className="text-xs text-muted-foreground">Loading logs…</p> : !logs?.length ? (
+                  {ll && !logs ? <p className="text-xs text-muted-foreground">Loading logs…</p> : !logs?.length ? (
                     <p className="text-xs text-muted-foreground">No logs yet</p>
                   ) : (
                     <div className="space-y-1.5 font-mono">
@@ -361,7 +372,7 @@ export default function Agents() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [dispatchAgent, setDispatchAgent] = useState<any>(null);
-  const { data: agents, isLoading, refetch } = trpc.agents.list.useQuery(undefined, { refetchInterval: 10_000 });
+  const { data: agents, isLoading, refetch } = trpc.agents.list.useQuery(undefined, { refetchInterval: 5000 });
   const { data: secrets } = trpc.secrets.list.useQuery();
   const updateStatus = trpc.agents.updateStatus.useMutation({
     onSuccess: () => { refetch(); toast.success("Agent status updated"); },
@@ -382,7 +393,7 @@ export default function Agents() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Bot className="w-6 h-6 text-primary" />Agents</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Live status · auto-refreshes every 10s · {activeCount} active · {totalTasks} tasks done</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Live status · auto-refreshes every 5s · {activeCount} active · {totalTasks} tasks done</p>
         </div>
         <div className="flex gap-2">
           <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setCreateOpen(true)}>
